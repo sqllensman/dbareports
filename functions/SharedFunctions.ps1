@@ -893,3 +893,85 @@ Function Get-Config
 	Set-Variable -Name SqlServer -Value $config.sqlserver -Scope Script
 	Set-Variable -Name InstallDatabase -Value $config.InstallDatabase -Scope Script
 }
+
+Function Get-GuiConfigFileName
+{
+	$docs = [Environment]::GetFolderPath("MyDocuments")
+	$folder = "$docs\WindowsPowerShell\Modules\dbareports"
+	$guiconfigfile = "$folder\dbareports-gui-config.json"
+	$exists = Test-Path $guiconfigfile
+	
+	if ($exists -eq $true)
+	{
+		return $guiconfigfile
+	}
+	else
+	{
+		$folderexists = Test-Path $folder
+		
+		if ($folderexists -eq $false)
+		{
+			$null = New-Item -ItemType Directory $folder -Force -ErrorAction Ignore
+		}
+		return $guiconfigfile
+	}
+}
+
+Function Get-AlertConfig
+{
+	$config = Get-Content -Raw -Path (Get-GuiConfigFileName) -ErrorAction SilentlyContinue | ConvertFrom-Json
+	
+	if ($config.DiskSpace.length -eq 0)
+	{
+		# Not sure how I'll handle this one just yet. AsyncPing? Or Connect?
+		$OnlineConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+		}
+		
+		$DiskSpaceConfig = @{
+			WarningThreshold = 70
+			AlarmThreshold = 95
+			IgnoreServer = @() # 'server1','server2'
+		}
+		
+		$JobConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+			IgnoreJobName = @() # 'Import Checker', 'Replication Checker'
+		}
+		
+		$JobConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+			IgnoreDatabaseName = @() # 'db1', 'db2'
+		}
+		
+		$SuspectPageConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+			IgnoreDatabaseName = @() # 'db1', 'db2'
+		}
+		
+		$FullBackupConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+			IgnoreDatabaseName = @() # 'db1', 'db2'
+		}
+		
+		$LogBackupConfig = @{
+			IgnoreInstance = @() # 'sqlserver1','sql2\instancename'
+			IgnoreDatabaseName = @() # 'db1', 'db2'
+		}
+		
+		$json = @{
+			Online = $OnlineConfig
+			DiskSpace = $DiskSpaceConfig
+			JobStatus = $JobConfig
+			SuspectPage = $SuspectPageConfig
+			FullBackup = $FullBackupConfig
+			LogBackup = $LogBackupConfig
+		}
+		
+		$config = Get-GuiConfigFileName
+		Write-Output "Writing config to $config"
+		$json | ConvertTo-Json | Set-Content -Path $config -Force
+	}
+	
+	$config = Get-Content -Raw -Path (Get-GuiConfigFileName) -ErrorAction SilentlyContinue | ConvertFrom-Json
+}
