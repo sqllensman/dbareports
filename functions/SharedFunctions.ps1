@@ -973,5 +973,5 @@ Function Get-AlertConfig
 		$json | ConvertTo-Json | Set-Content -Path $config -Force
 	}
 	
-	$config = Get-Content -Raw -Path (Get-GuiConfigFileName) -ErrorAction SilentlyContinue | ConvertFrom-Json
+	return (Get-Content -Raw -Path (Get-GuiConfigFileName) -ErrorAction SilentlyContinue | ConvertFrom-Json)
 }
