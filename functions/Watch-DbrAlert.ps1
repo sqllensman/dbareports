@@ -95,8 +95,70 @@ Note that the PowerShell window will disappear.
 						
 			foreach ($monitor in $monitors)
 			{
-				# I have no idea what I'm doing here
-				$monitorconfig = $alertjson | Where-Object { $_.Something -eq $monitor }
+				$monitorconfig = $alertjson.$monitor
+				
+				switch ($monitor)
+				{
+					'Online'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Online'
+							'Healthy' = 25
+							'Warnings' = 0
+							'Alarms' = 0
+						}
+					}
+					
+					'DiskSpace'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Disk Space'
+							'Healthy' = 22
+							'Warnings' = 2
+							'Alarms' = 1
+						}
+					}
+					
+					'JobStatus'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Job Status'
+							'Healthy' = 24
+							'Warnings' = 0
+							'Alarms' = 1
+						}
+					}
+					
+					'SuspectPage'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Suspect Pages'
+							'Healthy' = 22
+							'Warnings' = 1
+							'Alarms' = 1
+						}
+					}
+					
+					'FullBackup'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Outdated Full'
+							'Healthy' = 25
+							'Warnings' = 0
+							'Alarms' = 0
+						}
+					}
+					
+					'LogBackup'
+					{
+						$script:itemsource += [PSCustomObject]@{
+							'Monitor' = 'Outdated Log'
+							'Healthy' = 25
+							'Warnings' = 0
+							'Alarms' = 0
+						}
+					}
+				}
 				
 				# if ignore -join where servers notin ('$ignores')
 				try
@@ -107,10 +169,8 @@ Note that the PowerShell window will disappear.
 				catch
 				{
 					Write-Exception $_
-					throw "oops"
 				}
 			}
-			
 		}
 		
 		Function Update-WindowStatus
@@ -118,66 +178,12 @@ Note that the PowerShell window will disappear.
 			Param ([string]$title = "dbareports alert status changed")
 			$now = Get-Date
 			
-			<#
 			if ($script:itemsource.length -eq 0)
 			{
 				Update-ListView
 			}
-			#>
 			
-			# UNTIL THE ABOVE MONITOR THING WORKS, DO THIS
-			$itemsource = @()
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Disk Space'
-				'Healthy' = 22
-				'Warnings' = 2
-				'Alarms' = 1
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Job Status'
-				'Healthy' = 24
-				'Warnings' = 0
-				'Alarms' = 1
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Suspect Pages'
-				'Healthy' = 22
-				'Warnings' = 1
-				'Alarms' = 1
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Job Status'
-				'Healthy' = 24
-				'Warnings' = 1
-				'Alarms' = 0
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Online'
-				'Healthy' = 25
-				'Warnings' = 0
-				'Alarms' = 0
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Outdated Full'
-				'Healthy' = 25
-				'Warnings' = 0
-				'Alarms' = 0
-			}
-			
-			$itemsource += [PSCustomObject]@{
-				'Monitor' = 'Outdated Log'
-				'Healthy' = 25
-				'Warnings' = 0
-				'Alarms' = 0
-			}
-			
-			$listviewJobs.ItemsSource = $itemsource
+			$listviewJobs.ItemsSource = $script:itemsource
 			
 			$timestamp.Content = "Last Updated: $now"
 			
@@ -228,7 +234,6 @@ Note that the PowerShell window will disappear.
 		$greenicon = Get-Base64Icon $base64green
 		
 		# Create XAML form in Visual Studio, ensuring the ListView looks chromeless
-		# THIS IS OLD CODE AND DOES NOT MATCH UP WITH WHAT WE'RE TRYING TO ACCOMPLISH FOR DBAREPORTS
 		[xml]$xaml = '<Window
 			xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 			xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -349,6 +354,7 @@ Note that the PowerShell window will disappear.
 			})
 		
 		$notifyicon.Visible = $true
+		
 		Update-WindowStatus -Title "Current Status"
 		
 		$buildlistviewtimer = New-Object System.Windows.Forms.Timer
