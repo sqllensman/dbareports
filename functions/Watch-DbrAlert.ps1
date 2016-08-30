@@ -47,7 +47,7 @@ Note that the PowerShell window will disappear.
 			throw "No config file found. Have you installed dbareports? Please run Install-DbaReports or Install-DbaReportsClient"
 		}
 		
-		$server = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential
+		$sourceserver = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential
 		
 		Function Get-Base64Icon
 		{
@@ -82,6 +82,7 @@ Note that the PowerShell window will disappear.
 			$bitmap.Freeze()
 			return $bitmap
 		}
+		
 		function New-RunSpace
 		{
 			Param (
@@ -96,11 +97,14 @@ Note that the PowerShell window will disappear.
 					[string]$monitor
 				)
 				
+				$sql = 'Select 25 as Healthy, 0 as Warnings, 0 as Alarms'
+				$results = $db.ExecuteWithResults($sql).Tables
+				
 				$newobject = [PSCustomObject]@{
 					'Monitor' = $monitor
-					'Healthy' = 25
-					'Warnings' = 0
-					'Alarms' = 0
+					'Healthy' = $results.Healthy
+					'Warnings' = $results.Warnings
+					'Alarms' = $results.Alarms
 				}
 				
 				return $newobject
@@ -108,7 +112,7 @@ Note that the PowerShell window will disappear.
 			
 			$runspace = [PowerShell]::Create()
 			$null = $runspace.AddScript($scriptblock)
-			$null = $runspace.AddArgument($server.Databases[$InstallDatabase])
+			$null = $runspace.AddArgument($sourceserver.Databases[$InstallDatabase])
 			$null = $runspace.AddArgument($sql)
 			$null = $runspace.AddArgument($monitor)
 			$runspace.RunspacePool = $script:pool
@@ -117,13 +121,13 @@ Note that the PowerShell window will disappear.
 		
 		function Update-ListView
 		{
+			$tempitemsource = @()
 			$script:pool = [RunspaceFactory]::CreateRunspacePool(1, [int]($env:NUMBER_OF_PROCESSORS) + 1)
 			$pool.ApartmentState = "MTA"
 			$pool.Open()
 			$runspaces = @()
-			
 			$alertjson = Get-AlertConfig
-			
+			$health = $errors = $warnings = 0
 			$monitors = 'Online', 'DiskSpace', 'JobStatus', 'SuspectPage', 'FullBackup', 'LogBackup'
 			
 			foreach ($monitor in $monitors)
@@ -134,8 +138,46 @@ Note that the PowerShell window will disappear.
 				{
 					'Online'
 					{
-						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
+						$servers = Get-Instances
+						
+						foreach ($testserver in $servers)
+						{
+							try
+							{
+								$testConnect = New-Object Microsoft.SqlServer.Management.Smo.Server $testserver.Name
+								$testConnect.ConnectionContext.ConnectTimeout = 2
+								$testConnect.ConnectionContext.Connect()
+								$testConnect.ConnectionContext.Disconnect()
+								$health++
+							}
+							catch
+							{
+								$exception = ($_.Exception.InnerException.InnerException).ToString()
+								
+								if ($exception -like "*A network-related or instance-specific error*")
+								{
+									write-warning "error"
+									$errors++
+								}
+								elseif ($exception -like "*Login failed*")
+								{
+									write-warning "health"
+									$health++
+								}
+								else
+								{
+									write-warning "warn"
+									$warnings++	
+								}
+							}
+						}
+						
+						$tempitemsource += [PSCustomObject]@{
+							'Monitor' = $monitor
+							'Healthy' = $health
+							'Warnings' = $warnings
+							'Alarms' = $errors
+						}
 					}
 					
 					'DiskSpace'
@@ -171,7 +213,6 @@ Note that the PowerShell window will disappear.
 			}
 			while ($runspaces.Status.IsCompleted -notcontains $true) { }
 			
-			$tempitemsource = @()
 			foreach ($runspace in $runspaces)
 			{
 				# EndInvoke method retrieves the results of the asynchronous call
@@ -388,11 +429,11 @@ Note that the PowerShell window will disappear.
 		
 		$timer.start()
 		
-		# Make PowerShell Disappear
+		<# Make PowerShell Disappear
 		$windowcode = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
 		$asyncwindow = Add-Type -MemberDefinition $windowcode -name Win32ShowWindowAsync -namespace Win32Functions -PassThru
 		$null = $asyncwindow::ShowWindowAsync((Get-Process -Id $pid).MainWindowHandle, 0)
-		
+		#>
 		# Force garbage collection just to start slightly lower RAM usage.
 		[System.GC]::Collect()
 		
