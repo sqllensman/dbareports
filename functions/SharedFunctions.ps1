@@ -774,7 +774,7 @@ Function New-DbrAgentJobCategory
 
 function Get-Instances
 {
-	$sql = "SELECT DISTINCT ServerName, InstanceName, InstanceId,Serverid FROM [dbo].[InstanceList] Where Inactive = 0 AND NotContactable = 0"
+	$sql = "SELECT DISTINCT Name, ServerName, InstanceName, InstanceId, Serverid FROM [dbo].[InstanceList] Where Inactive = 0 AND NotContactable = 0"
 	try
 	{
 		$server = $sourceserver.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables
