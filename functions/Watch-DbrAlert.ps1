@@ -82,17 +82,50 @@ Note that the PowerShell window will disappear.
 			$bitmap.Freeze()
 			return $bitmap
 		}
+		function New-RunSpace
+		{
+			Param (
+				[string]$sql,
+				[string]$monitor
+			)
+			
+			$scriptblock = {
+				Param (
+					[object]$db,
+					[string]$sql,
+					[string]$monitor
+				)
+				
+				$newobject = [PSCustomObject]@{
+					'Monitor' = $monitor
+					'Healthy' = 25
+					'Warnings' = 0
+					'Alarms' = 0
+				}
+				
+				return $newobject
+			}
+			
+			$runspace = [PowerShell]::Create()
+			$null = $runspace.AddScript($scriptblock)
+			$null = $runspace.AddArgument($server.Databases[$InstallDatabase])
+			$null = $runspace.AddArgument($sql)
+			$null = $runspace.AddArgument($monitor)
+			$runspace.RunspacePool = $script:pool
+			return $runspace
+		}
 		
 		function Update-ListView
 		{
-			$script:itemsource = @()
-			
-			$never = "1/1/0001 12:00 AM"
+			$script:pool = [RunspaceFactory]::CreateRunspacePool(1, [int]($env:NUMBER_OF_PROCESSORS) + 1)
+			$pool.ApartmentState = "MTA"
+			$pool.Open()
+			$runspaces = @()
 			
 			$alertjson = Get-AlertConfig
 			
 			$monitors = 'Online', 'DiskSpace', 'JobStatus', 'SuspectPage', 'FullBackup', 'LogBackup'
-						
+			
 			foreach ($monitor in $monitors)
 			{
 				$monitorconfig = $alertjson.$monitor
@@ -101,82 +134,63 @@ Note that the PowerShell window will disappear.
 				{
 					'Online'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Online'
-							'Healthy' = 25
-							'Warnings' = 0
-							'Alarms' = 0
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'DiskSpace'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Disk Space'
-							'Healthy' = 22
-							'Warnings' = 2
-							'Alarms' = 1
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'JobStatus'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Job Status'
-							'Healthy' = 24
-							'Warnings' = 0
-							'Alarms' = 1
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'SuspectPage'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Suspect Pages'
-							'Healthy' = 22
-							'Warnings' = 1
-							'Alarms' = 1
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'FullBackup'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Outdated Full'
-							'Healthy' = 25
-							'Warnings' = 0
-							'Alarms' = 0
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'LogBackup'
 					{
-						$script:itemsource += [PSCustomObject]@{
-							'Monitor' = 'Outdated Log'
-							'Healthy' = 25
-							'Warnings' = 0
-							'Alarms' = 0
-						}
+						$runspace = New-RunSpace -Sql $sql -Monitor $monitor
+						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 				}
-				
-				# if ignore -join where servers notin ('$ignores')
-				try
-				{
-					#$sql = "SELECT * FROM [dbo].[InstanceList]"
-					#$results = $server.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables
-				}
-				catch
-				{
-					Write-Exception $_
-				}
 			}
+			while ($runspaces.Status.IsCompleted -notcontains $true) { }
+			
+			$tempitemsource = @()
+			foreach ($runspace in $runspaces)
+			{
+				# EndInvoke method retrieves the results of the asynchronous call
+				$tempitemsource += $runspace.Pipe.EndInvoke($runspace.Status)
+				$runspace.Pipe.Dispose()
+			}
+			
+			$pool.Close()
+			$pool.Dispose()
+			
+			$script:olditemsource = $script:itemsource
+			$script:itemsource = $tempitemsource
 		}
 		
 		Function Update-WindowStatus
 		{
-			Param ([string]$title = "dbareports alert status changed")
-			$now = Get-Date
+			Param (
+				[string]$title = "dbareports alert status changed"
+			)
 			
 			if ($script:itemsource.length -eq 0)
 			{
@@ -184,8 +198,7 @@ Note that the PowerShell window will disappear.
 			}
 			
 			$listviewJobs.ItemsSource = $script:itemsource
-			
-			$timestamp.Content = "Last Updated: $now"
+			$timestamp.Content = "Last Updated: $(Get-Date)"
 			
 			# this is old code to make the notify icon dynamic 
 			# and to pop up a Toast that says there has been a failure.
@@ -220,6 +233,7 @@ Note that the PowerShell window will disappear.
 			}
 		}
 	}
+	
 	PROCESS
 	{
 		# currently don't have yellow icon
@@ -286,7 +300,7 @@ Note that the PowerShell window will disappear.
 		$window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
 		$xaml.SelectNodes("//*[@Name]") | ForEach-Object { Set-Variable -Name ($_.Name) -Value $window.FindName($_.Name) -Scope Script }
 		
-		$columnorder = 'Monitor','Healthy','Warnings','Alarms'
+		$columnorder = 'Monitor', 'Healthy', 'Warnings', 'Alarms'
 		
 		# Dynamic populator
 		# Populate ListView with PS Object data and set width
@@ -385,6 +399,5 @@ Note that the PowerShell window will disappear.
 		# Create an application context for it to all run within.
 		$appContext = New-Object System.Windows.Forms.ApplicationContext
 		[void][System.Windows.Forms.Application]::Run($appContext)
-		
 	}
 }
