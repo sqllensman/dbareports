@@ -86,14 +86,12 @@ Note that the PowerShell window will disappear.
 		function New-ConnectivityRunSpace
 		{
 			Param (
-				[string]$sqlserver,
-				[object]$itemsource
+				[string]$sqlserver
 			)
 			
 			$scriptblock = {
 				Param (
-					[string]$sqlserver,
-					[object]$itemsource
+					[string]$sqlserver
 				)
 				
 				try
@@ -126,7 +124,6 @@ Note that the PowerShell window will disappear.
 			$runspace = [PowerShell]::Create()
 			$null = $runspace.AddScript($scriptblock)
 			$null = $runspace.AddArgument($sqlserver)
-			$null = $runspace.AddArgument($itemsource)
 			$runspace.RunspacePool = $script:pool
 			return $runspace
 		}
@@ -135,21 +132,18 @@ Note that the PowerShell window will disappear.
 		{
 			Param (
 				[string]$sql,
-				[string]$monitor,
-				[object]$itemsource
+				[string]$monitor
 			)
-			
 			
 			$scriptblock = {
 				Param (
-					[object]$server,
+					[object]$db,
 					[string]$sql,
-					[string]$monitor,
-					[object]$itemsource
+					[string]$monitor
 				)
 				
 				$sql = 'Select 25 as Healthy, 0 as Warnings, 0 as Alarms'
-				$results = $server.ConnectionContext.ExecuteWithResults($sql).Tables
+				$results = $db.ExecuteWithResults($sql).Tables
 				
 				$newobject = [PSCustomObject]@{
 					'Monitor' = $monitor
@@ -158,23 +152,21 @@ Note that the PowerShell window will disappear.
 					'Alarms' = $results.Alarms
 				}
 				
-				[System.Threading.Monitor]::Enter($itemsource.syncroot)
-				[void]$itemsource.Add($newobject)
-				[System.Threading.Monitor]::Exit($itemsource.syncroot)
+				return $newobject
 			}
 			
 			$runspace = [PowerShell]::Create()
 			$null = $runspace.AddScript($scriptblock)
-			$null = $runspace.AddArgument($sourceserver)
+			$null = $runspace.AddArgument($sourceserver.Databases[$InstallDatabase])
 			$null = $runspace.AddArgument($sql)
 			$null = $runspace.AddArgument($monitor)
-			$null = $runspace.AddArgument($itemsource)
 			$runspace.RunspacePool = $script:pool
 			return $runspace
 		}
 		
 		function Update-ListView
 		{
+			$tempitemsource = @()
 			$script:pool = [RunspaceFactory]::CreateRunspacePool(1, [int]($env:NUMBER_OF_PROCESSORS) + 1)
 			$pool.ApartmentState = "MTA"
 			$pool.Open()
@@ -193,38 +185,38 @@ Note that the PowerShell window will disappear.
 					{
 						foreach ($servername in (Get-Instances))
 						{
-							$runspace = New-ConnectivityRunSpace -sqlserver $servername.Name -ItemSource $itemsource
+							$runspace = New-ConnectivityRunSpace -sqlserver $servername.Name
 							$connectionrunspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 						}
 					}
 					
 					'DiskSpace'
 					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor -ItemSource $itemsource
+						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
 						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'JobStatus'
 					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor -ItemSource $itemsource
+						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
 						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'SuspectPage'
 					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor -ItemSource $itemsource
+						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
 						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'FullBackup'
 					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor -ItemSource $itemsource
+						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
 						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 					
 					'LogBackup'
 					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor -ItemSource $itemsource
+						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
 						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 					}
 				}
@@ -236,15 +228,12 @@ Note that the PowerShell window will disappear.
 			foreach ($runspace in $runspaces)
 			{
 				# EndInvoke method retrieves the results of the asynchronous call
-				$results = $runspace.Pipe.EndInvoke($runspace.Status)
-				# $tempitemsource += $runspace.Pipe.EndInvoke($runspace.Status)
+				$tempitemsource += $runspace.Pipe.EndInvoke($runspace.Status)
 				$runspace.Pipe.Dispose()
 			}
 			
 			# Finish up connection attempt runspaces
-			while ($connectionrunspaces.Status.IsCompleted -notcontains $true) { }
-			
-			$health = $warnings = $alarms = 0
+			while ($connectionrunspaces.Status.IsCompleted -notcontains $true) { $health = $warnings = $alarms = 0 }
 			
 			foreach ($runspace in $connectionrunspaces)
 			{
@@ -257,21 +246,19 @@ Note that the PowerShell window will disappear.
 				
 				$runspace.Pipe.Dispose()
 			}
-					
 			
-			$object = [PSCustomObject]@{
+			$tempitemsource += [PSCustomObject]@{
 				'Monitor' = "Online"
 				'Healthy' = $health
 				'Warnings' = $warnings
 				'Alarms' = $alarms
 			}
-						
-			[System.Threading.Monitor]::Enter($itemsource.syncroot)
-			[void]$itemsource.Add($object)
-			[System.Threading.Monitor]::Exit($itemsource.syncroot)
 			
 			$pool.Close()
 			$pool.Dispose()
+			
+			$script:olditemsource = $script:itemsource
+			$script:itemsource = $tempitemsource
 		}
 		
 		Function Update-WindowStatus
@@ -280,12 +267,12 @@ Note that the PowerShell window will disappear.
 				[string]$title = "dbareports alert status changed"
 			)
 			
-			if ($itemsource.count -eq 0)
+			if ($script:itemsource.length -eq 0)
 			{
 				Update-ListView
 			}
 			
-			$listviewJobs.ItemsSource = $itemsource
+			$listviewJobs.ItemsSource = $script:itemsource
 			$timestamp.Content = "Last Updated: $(Get-Date)"
 			
 			# this is old code to make the notify icon dynamic 
@@ -320,8 +307,6 @@ Note that the PowerShell window will disappear.
 				}
 			}
 		}
-		
-		$itemsource = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 	}
 	
 	PROCESS
@@ -475,11 +460,11 @@ Note that the PowerShell window will disappear.
 				Update-WindowStatus
 			})
 		
-		<# Make PowerShell Disappear
+		# Make PowerShell Disappear
 		$windowcode = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
 		$asyncwindow = Add-Type -MemberDefinition $windowcode -name Win32ShowWindowAsync -namespace Win32Functions -PassThru
 		$null = $asyncwindow::ShowWindowAsync((Get-Process -Id $pid).MainWindowHandle, 0)
-		#>
+		
 		# Force garbage collection just to start slightly lower RAM usage.
 		[System.GC]::Collect()
 		
