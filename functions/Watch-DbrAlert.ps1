@@ -131,25 +131,26 @@ Note that the PowerShell window will disappear.
 		function New-MonitorRunSpace
 		{
 			Param (
-				[string]$sql,
 				[string]$monitor
 			)
 			
 			$scriptblock = {
 				Param (
-					[object]$db,
-					[string]$sql,
+					[object]$server,
 					[string]$monitor
 				)
 				
 				$sql = 'Select 25 as Healthy, 0 as Warnings, 0 as Alarms'
-				$results = $db.ExecuteWithResults($sql).Tables
+				$results = $server.ConnectionContext.ExecuteWithResults($sql).Tables
 				
+				$healthy = $results.Healthy.ToString()
+				
+				Add-Content -Value "$monitor $healthy" -Path C:\temp\rs.txt
 				$newobject = [PSCustomObject]@{
 					'Monitor' = $monitor
-					'Healthy' = $results.Healthy
-					'Warnings' = $results.Warnings
-					'Alarms' = $results.Alarms
+					'Healthy' = $results.Healthy.ToString()
+					'Warnings' = $results.Warnings.ToString()
+					'Alarms' = $results.Alarms.ToString()
 				}
 				
 				return $newobject
@@ -157,8 +158,7 @@ Note that the PowerShell window will disappear.
 			
 			$runspace = [PowerShell]::Create()
 			$null = $runspace.AddScript($scriptblock)
-			$null = $runspace.AddArgument($sourceserver.Databases[$InstallDatabase])
-			$null = $runspace.AddArgument($sql)
+			$null = $runspace.AddArgument($sourceserver)
 			$null = $runspace.AddArgument($monitor)
 			$runspace.RunspacePool = $script:pool
 			return $runspace
@@ -173,53 +173,21 @@ Note that the PowerShell window will disappear.
 			$connectionrunspaces = $runspaces = @()
 			$alertjson = Get-AlertConfig
 			$health = $errors = $warnings = 0
-			$monitors = 'Online', 'DiskSpace', 'JobStatus', 'SuspectPage', 'FullBackup', 'LogBackup'
+			$monitors = 'DiskSpace', 'JobStatus', 'SuspectPage', 'FullBackup', 'LogBackup'
 			
 			foreach ($monitor in $monitors)
 			{
+				write-warning $monitor
 				$monitorconfig = $alertjson.$monitor
-				
-				switch ($monitor)
-				{
-					'Online'
-					{
-						foreach ($servername in (Get-Instances))
-						{
-							$runspace = New-ConnectivityRunSpace -sqlserver $servername.Name
-							$connectionrunspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-						}
-					}
-					
-					'DiskSpace'
-					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-					}
-					
-					'JobStatus'
-					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-					}
-					
-					'SuspectPage'
-					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-					}
-					
-					'FullBackup'
-					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-					}
-					
-					'LogBackup'
-					{
-						$runspace = New-MonitorRunSpace -Sql $sql -Monitor $monitor
-						$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
-					}
-				}
+				$runspace = New-MonitorRunSpace -Monitor $monitor
+				$runspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
+			}
+			
+			# Test if they're online
+			foreach ($servername in (Get-Instances))
+			{
+				$runspace = New-ConnectivityRunSpace -sqlserver $servername.Name
+				$connectionrunspaces += [PSCustomObject]@{ Pipe = $runspace; Status = $runspace.BeginInvoke() }
 			}
 			
 			# Finish up T-SQL query-based runspaces
@@ -233,8 +201,9 @@ Note that the PowerShell window will disappear.
 			}
 			
 			# Finish up connection attempt runspaces
-			while ($connectionrunspaces.Status.IsCompleted -notcontains $true) { $health = $warnings = $alarms = 0 }
+			while ($connectionrunspaces.Status.IsCompleted -notcontains $true) { }
 			
+			$health = $warnings = $alarms = 0
 			foreach ($runspace in $connectionrunspaces)
 			{
 				switch ($runspace.Pipe.EndInvoke($runspace.Status))
@@ -460,10 +429,11 @@ Note that the PowerShell window will disappear.
 				Update-WindowStatus
 			})
 		
-		# Make PowerShell Disappear
+		<# Make PowerShell Disappear
 		$windowcode = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
 		$asyncwindow = Add-Type -MemberDefinition $windowcode -name Win32ShowWindowAsync -namespace Win32Functions -PassThru
 		$null = $asyncwindow::ShowWindowAsync((Get-Process -Id $pid).MainWindowHandle, 0)
+		#>
 		
 		# Force garbage collection just to start slightly lower RAM usage.
 		[System.GC]::Collect()
