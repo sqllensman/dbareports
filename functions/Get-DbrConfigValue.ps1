@@ -1,10 +1,10 @@
-﻿function Get-DbrConfig {
+﻿function Get-DbrConfigValue {
     <#
         .SYNOPSIS
-            Retrieves configuration elements by name.
+            Retrieves raw configuration values by name.
         
         .DESCRIPTION
-            Retrieves configuration elements by name.
+            Retrieves raw configuration values by name.
             
             Can be used to search the existing configuration list.
     
@@ -13,16 +13,16 @@
             
             The name of the configuration element(s) to retrieve.
             May be any string, supports wildcards.
-        
+    
         .PARAMETER EnableException
             By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
             This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
             Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
             
         .EXAMPLE
-            Get-DbrConfig Lists.SqlServers
+            Get-DbrConfigValue app.sqlinstance
             
-            Retrieves the configuration element for the key "Lists.SqlServers"
+            Retrieves the raw value for the key "app.sqlinstance"
     #>
     [CmdletBinding()]
     param (
@@ -35,7 +35,6 @@
     }
     process {
         $Name = $Name.ToLower()
-        $results = [PSFramework.Configuration.ConfigurationHost]::Configurations.Values | Where-Object { ($_.Name -like $Name) -and ($_.Module -like $Module) -and ((-not $_.Hidden) -or ($Force)) } | Sort-Object Module, Name
-        $results | Select-Object Name, Value, Description
+        Get-DbrConfig -Name $name | Select-Object -ExpandProperty Value
     }
 }

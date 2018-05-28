@@ -1,47 +1,47 @@
 ﻿Function Remove-DbrServerFromInventory
 {
 <#
-.SYNOPSIS 
-Removes a server from the dbareports inventory of sql servers.
+	.SYNOPSIS 
+		Removes a server from the dbareports inventory of sql servers.
 
-.DESCRIPTION
-Removes instance/server from the instance list table within the dba reports database. Doing so will mean you are no longer able to report on that server. If you have decommissioned the server but still want to report/hold information on it then use the Set-DbrInstanceInactiveInInventory cmdlet instead.
+	.DESCRIPTION
+		Removes instance/server from the instance list table within the dba reports database. Doing so will mean you are no longer able to report on that server. If you have decommissioned the server but still want to report/hold information on it then use the Set-DbrInstanceInactiveInInventory cmdlet instead.
 
-.PARAMETER
-Dynamic parameter returns a list of servers/instances
+	.PARAMETER 
+	Dynamic parameter returns a list of servers/instances
 
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
+	.LINK
+		https://dbareports.io/functions/Remove-DbrServerFromInventory
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-.LINK
-https://dbareports.io/functions/Remove-DbrServerFromInventory
-
-.EXAMPLE
-Remove-DbrServerFromInventory SQLServer01
-Removes the server "SQLServer01" from the instance list table within the dba reports database.
+	.EXAMPLE
+		Remove-DbrServerFromInventory SQLServer01
+		Removes the server "SQLServer01" from the instance list table within the dba reports database.
 
 
-#>
-	[CmdletBinding()]
-	Param ()
+	#>
+		[CmdletBinding()]
+		Param ()
 	
 	DynamicParam { return Get-ParamSqlServerInventory }
 	
 	BEGIN
 	{
-		Get-Config
-		$SqlServer = $script:SqlServer
-		$InstallDatabase = $script:InstallDatabase
-		$SqlCredential = $script:SqlCredential
+        $Module = "dbareports"
 		
-		$sourceserver = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential
+        $SqlInstance = Get-DbrConfigValue -Name app.sqlinstance
+        $InstallDatabase = Get-DbrConfigValue -Name app.databasename
+        $SqlCredential = Get-DbrConfigValue -Name app.sqlcredential
+		
+        # Connect to dbareports server
+        try {
+            Write-PSFMessage -Level Verbose  -Message "Connecting to $SqlInstance" -Tag $Module
+            $Server = Connect-DbaInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential 
+        }
+        catch {
+            Stop-PSFFunction -Message "Failed to connect to $SqlInstance" -ErrorRecord $_ -Tag $Module #-EnableException $EnableException 
+            break
+        }
+
 		
 		# Get columns automatically from the table on the SQL Server
 		# and creates the necessary $script:datatable with it

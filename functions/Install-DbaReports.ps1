@@ -1,149 +1,149 @@
 ﻿Function Install-DbaReports
 {
-  <#
-      .SYNOPSIS 
-      Installs both the server and client components for dbareports. To install only the client component, use Install-DbaReportsClient.
+<#
+    .SYNOPSIS 
+        Installs both the server and client components for dbareports. To install only the client component, use Install-DbaReportsClient.
 
-      .DESCRIPTION
-      Installs the following on the specified SQL server:
-	
-      Database with all required tables, stored procedures, extended properties etc.
-      Adds the executing account (SQL Agent account if no proxy specified) as dbo to the database
-      Proxy/Credential (if required)
-      Agent Category ("dbareports collection jobs")
-      Agent Jobs
-      Job Schedules
-      Copies PowerShell files to SQL Server or shared network directory
-
-      - If the specified database does not exist, you will be prompted to confirm that the script should create it.
-      - If no Proxy Account is specified, you will be prompted to create one automatically or accept that the Agent ServiceAccount has access
-      - If no InstallDirectory is specified, the SQL Server's backup directory will be used by default
-      - If no LogFileDirectory is specified, InstallDirectory\logs will be used 
-
-      Installs the following on the local client
-	
-      Config file at Documents\WindowsPowerShell\Modules\dbareports\dbareports-config.json
-	
-      The config file is pretty simple. This is for Windows (Trusted) Authentication
-	
-      {
-      "Username":  null,
-      "SqlServer":  "sql2016",
-      "InstallDatabase":  "dbareports",
-      "SecurePassword":  null
-      }
-	
-      And the following for SQL Login
-      {
-      "Username":  "sqladmin",
-      "SqlServer":  "sql2016",
-      "InstallDatabase":  "dbareports",
-      "SecurePassword":  "01000000d08c9ddf0115d1118c7a00c04fc297eb010000etcetc"
-      }
-
-      Or alternative Windows credentials 
-      {
-      "Username":  "ad\\dataadmin",
-      "SqlServer":  "sqlcluster",
-      "InstallDatabase":  "dbareports",
-      "SecurePassword":  "01000000d08c9ddf0115d1118c7a00c04fc297eb010000etcetc"
-      }
-	
-      Note that only the account that created the config file can decrypt the SecurePassword
-	
-      .PARAMETER SqlServer
-      The SQL Server Instance that will hold the dbareports database and the agent jobs
-
-      .PARAMETER SqlCredential
-      Allows you to login to servers using SQL Logins as opposed to Windows Auth/Integrated/Trusted.
-
-      .PARAMETER InstallDatabase
-      The name of the database that will hold all of the information that the agent jobs gather. Defaults to dbareports
-
-      .PARAMETER InstallPath
-      The folder that will hold the PowerShell scripts that the Agent Jobs call and the logfiles for the agent jobs. The Agent account or Proxy must have access to this folder.
-	
-      If no InstallPath is specified, the SQL Server's default backup directory is used. 
-
-      .PARAMETER LogFileFolder
-      The folder where the logs from the Agent Jobs will be written. Defaults to the "logs" folder in the Installpath directory.
-
-      .PARAMETER LogFileRetention
-      The number of days to keep the Log Files defaults to 30 days
-
-      .PARAMETER JobPrefix
-      The Prefix that gets added to the Agent Jobs defaults to dbareports
-
-      .PARAMETER JobCategory 
-      The category for the Agent Jobs. Defaults to "dbareports collection jobs"
-	
-      .PARAMETER TimeSpan
-      By default, the jobs are scheduled to execute daily unless NoJobSchedule is specified. The default time is 04:15. To change the time, pass different timespan.
-
-      $customtimespan = New-TimeSpan -hours 22 -minutes 15
-
-      This would set the schedule the jobs for 10:15 PM.
-	
-      .PARAMETER ReportsFolder
-      The folder where the report samples will be stored on the client (?)
-
-      .PARAMETER NoDatabaseObjects
-      A switch which will not update or create the database and its related objects
-
-      .PARAMETER NoJobs
-      A switch which will not install the Agent Jobs
-
-      .PARAMETER NoPsFileCopy
-      A switch which will not copy the PowerShell scripts
-
-      .PARAMETER NoJobSchedule
-      A switch which will not schedule the Agent Jobs
-
-      .PARAMETER NoConfig
-      A switch which will not create the json config file on the local machine. 
-
-      .PARAMETER NoAlias
-      A switch which means the script will not create an alias for the dbareports server
-
-      .PARAMETER NoShortcut
-      A switch which means the script will not create a shortcut on the desktop
-
-      .PARAMETER Force
-      A switch to force the installation of dbareports. This will drop and recreate everything and all of your data will be lost. "Use the force wisely DBA"
-
-      .PARAMETER Confirm
-      Prompts you for confirmation before executing the command.
-
-      .PARAMETER WhatIf
-      This doesnt work as install is too dynamic. Show what would happen if the cmdlet was run.
-      .NOTES 
-      dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-      Copyright (C) 2016 Rob Sewell
-
-      This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-      This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-      You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-      .LINK
-      https://dbareports.io/Install-DbaReports
-
-      .EXAMPLE
-      Install-DBAreports -SqlServer sql2016
-
-      Installs the dbareports database on SQL2016 and uses all defaults. Will not output to screen but will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
-
-      .EXAMPLE
-      Install-DBAreports -SqlServer sql2016 -InstallPath \\fileshare\share\sql
-
-      Installs the dbareports database on the server sql2016 and the powershell script files at \\fileshare\share\sql Will not output to screen but will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
-
-      .EXAMPLE
-      Install-DBAreports -SqlServer sql2016 -InstallPath \\fileshare\share\sql -Verbose
-
-      Installs the dbareports database on the server sql2016 and the powershell script files at \\fileshare\share\sql Will output to screen and will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
-  #>
+    .DESCRIPTION
+        Installs the following on the specified SQL server:
+    
+        Database with all required tables, stored procedures, extended properties etc.
+        Adds the executing account (SQL Agent account if no proxy specified) as dbo to the database
+        Proxy/Credential (if required)
+        Agent Category ("dbareports collection jobs")
+        Agent Jobs
+        Job Schedules
+        Copies PowerShell files to SQL Server or shared network directory
+    
+        - If the specified database does not exist, you will be prompted to confirm that the script should create it.
+        - If no Proxy Account is specified, you will be prompted to create one automatically or accept that the Agent ServiceAccount has access
+        - If no InstallDirectory is specified, the SQL Server's backup directory will be used by default
+        - If no LogFileDirectory is specified, InstallDirectory\logs will be used 
+        
+        Installs the following on the local client
+        
+        Config file at Documents\WindowsPowerShell\Modules\dbareports\dbareports-config.json
+        
+        The config file is pretty simple. This is for Windows (Trusted) Authentication
+    
+        {
+        "Username":  null,
+        "SqlServer":  "sql2016",
+        "InstallDatabase":  "dbareports",
+        "SecurePassword":  null
+        }
+    
+        And the following for SQL Login
+        {
+        "Username":  "sqladmin",
+        "SqlServer":  "sql2016",
+        "InstallDatabase":  "dbareports",
+        "SecurePassword":  "01000000d08c9ddf0115d1118c7a00c04fc297eb010000etcetc"
+        }
+        
+        Or alternative Windows credentials 
+        {
+        "Username":  "ad\\dataadmin",
+        "SqlServer":  "sqlcluster",
+        "InstallDatabase":  "dbareports",
+        "SecurePassword":  "01000000d08c9ddf0115d1118c7a00c04fc297eb010000etcetc"
+        }
+        
+        Note that only the account that created the config file can decrypt the SecurePassword
+    
+    .PARAMETER SqlServer
+    The SQL Server Instance that will hold the dbareports database and the agent jobs
+    
+    .PARAMETER SqlCredential
+    Allows you to login to servers using SQL Logins as opposed to Windows Auth/Integrated/Trusted.
+    
+    .PARAMETER InstallDatabase
+    The name of the database that will hold all of the information that the agent jobs gather. Defaults to dbareports
+    
+    .PARAMETER InstallPath
+    The folder that will hold the PowerShell scripts that the Agent Jobs call and the logfiles for the agent jobs. The Agent account or Proxy must have access to this folder.
+    
+    If no InstallPath is specified, the SQL Server's default backup directory is used. 
+    
+    .PARAMETER LogFileFolder
+    The folder where the logs from the Agent Jobs will be written. Defaults to the "logs" folder in the Installpath directory.
+    
+    .PARAMETER LogFileRetention
+    The number of days to keep the Log Files defaults to 30 days
+    
+    .PARAMETER JobPrefix
+    The Prefix that gets added to the Agent Jobs defaults to dbareports
+    
+    .PARAMETER JobCategory 
+    The category for the Agent Jobs. Defaults to "dbareports collection jobs"
+    
+    .PARAMETER TimeSpan
+    By default, the jobs are scheduled to execute daily unless NoJobSchedule is specified. The default time is 04:15. To change the time, pass different timespan.
+    
+    $customtimespan = New-TimeSpan -hours 22 -minutes 15
+    
+    This would set the schedule the jobs for 10:15 PM.
+    
+    .PARAMETER ReportsFolder
+    The folder where the report samples will be stored on the client (?)
+    
+    .PARAMETER NoDatabaseObjects
+    A switch which will not update or create the database and its related objects
+    
+    .PARAMETER NoJobs
+    A switch which will not install the Agent Jobs
+    
+    .PARAMETER NoPsFileCopy
+    A switch which will not copy the PowerShell scripts
+    
+    .PARAMETER NoJobSchedule
+    A switch which will not schedule the Agent Jobs
+    
+    .PARAMETER NoConfig
+    A switch which will not create the json config file on the local machine. 
+    
+    .PARAMETER NoAlias
+    A switch which means the script will not create an alias for the dbareports server
+    
+    .PARAMETER NoShortcut
+    A switch which means the script will not create a shortcut on the desktop
+    
+    .PARAMETER Force
+    A switch to force the installation of dbareports. This will drop and recreate everything and all of your data will be lost. "Use the force wisely DBA"
+    
+    .PARAMETER Confirm
+    Prompts you for confirmation before executing the command.
+    
+    .PARAMETER WhatIf
+    This doesnt work as install is too dynamic. Show what would happen if the cmdlet was run.
+    .NOTES 
+    dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
+    Copyright (C) 2016 Rob Sewell
+    
+    This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+    
+    This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+    
+    You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    
+    .LINK
+    https://dbareports.io/Install-DbaReports
+    
+    .EXAMPLE
+    Install-DBAreports -SqlServer sql2016
+    
+    Installs the dbareports database on SQL2016 and uses all defaults. Will not output to screen but will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
+    
+    .EXAMPLE
+    Install-DBAreports -SqlServer sql2016 -InstallPath \\fileshare\share\sql
+    
+    Installs the dbareports database on the server sql2016 and the powershell script files at \\fileshare\share\sql Will not output to screen but will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
+    
+    .EXAMPLE
+    Install-DBAreports -SqlServer sql2016 -InstallPath \\fileshare\share\sql -Verbose
+    
+    Installs the dbareports database on the server sql2016 and the powershell script files at \\fileshare\share\sql Will output to screen and will log to a log file in C:\Users\$ENV:USERNAME\Documents\WindowsPowerShell\Modules\dbareports\dbareports_install_DATE.txt
+#>
   [CmdletBinding(SupportsShouldProcess = $true)] 
   [OutputType([String])]
   Param (

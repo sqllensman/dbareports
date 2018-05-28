@@ -1,55 +1,50 @@
 ﻿Function Add-DbrServerToInventory
 {
 <#
-.SYNOPSIS 
-Adds an instance or an array of instances to the dbareports database using the config file
-
-.DESCRIPTION
-This command will add a SQL Instance or an array of instances to the dbareports database using the config file generated at install or via the dbrclient command
-
-.PARAMETER SqlInstance
-The instance or array of instances to add
-
-.PARAMETER SqlInstanceCredential
-The credential to connect to the dbareports database
-
-.PARAMETER Port
-The Port of the Instance to be added (if not specified then this is gathered)
-
-.PARAMETER Environment
-The terminology that you and your users use to define the environment the instance is in. Suggested examples are Prod or Production, Test, UAT, QA, PreProd, ProductionSupport,Development, etc
-
-.PARAMETER Location
-The terminology that you and your users use to define the location of the instance. It could be the town or city that the data centre is in or the name of the office etc
-
-.PARAMETER Confirm
-Prompts you for confirmation before executing the command.
-
-.PARAMETER WhatIf
-This doesnt work as install is too dynamic. Show what would happen if the cmdlet was run.
-
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-.LINK
-https://dbareports.io/functions/Add-DbrServerToInventory
-
-.EXAMPLE
-Add-DbrServerToInventory sql2016
-	
-Adds the SQL Server instance "sql2016" to the inventory then takes additional steps determined by the content of the config file.
-
-.EXAMPLE
-Add-DbrServerToInventory sql2016, sql2014
-	
-Adds the SQL Server instances sql2016 and sql2014 to the inventory then takes additional steps determined by the content of the config file.
+    .SYNOPSIS 
+        Adds an instance or an array of instances to the dbareports database using the config file
+    
+    .DESCRIPTION
+        This command will add a SQL Instance or an array of instances to the dbareports database using the config file generated at install or via the dbrclient command
+    
+    .PARAMETER SqlInstance
+        The instance or array of instances to add
+    
+    .PARAMETER SqlInstanceCredential
+        The credential to connect to the dbareports database
+    
+    .PARAMETER Port
+        The Port of the Instance to be added (if not specified then this is gathered)
+    
+    .PARAMETER Environment
+        The terminology that you and your users use to define the environment the instance is in. Suggested examples are Prod or Production, Test, UAT, QA, PreProd, ProductionSupport,Development, etc
+    
+    .PARAMETER Location
+        The terminology that you and your users use to define the location of the instance. It could be the town or city that the data centre is in or the name of the office etc
+    
+    .PARAMETER Confirm
+        Prompts you for confirmation before executing the command.
+    
+    .PARAMETER WhatIf
+        This doesnt work as install is too dynamic. Show what would happen if the cmdlet was run.
+    
+    .NOTES 
+        dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
+        Copyright (C) 2016 Rob Sewell
+        License: MIT https://opensource.org/licenses/MIT
+    
+    .LINK
+        https://dbareports.io/functions/Add-DbrServerToInventory
+    
+    .EXAMPLE
+        Add-DbrServerToInventory sql2016
+    	
+        Adds the SQL Server instance "sql2016" to the inventory then takes additional steps determined by the content of the config file.
+    
+    .EXAMPLE
+        Add-DbrServerToInventory sql2016, sql2014
+    	
+        Adds the SQL Server instances sql2016 and sql2014 to the inventory then takes additional steps determined by the content of the config file.
 #>
 	[CmdletBinding(SupportsShouldProcess = $true)] 
 	[OutputType([string])]
@@ -65,37 +60,15 @@ Adds the SQL Server instances sql2016 and sql2014 to the inventory then takes ad
 	
 	BEGIN
 	{
-		try	
-    	{
-      		$docs = [Environment]::GetFolderPath("MyDocuments")
-      		$Date = Get-Date -format yyyyMMddhhmmss
-
-      		If ($PSCmdlet.ShouldProcess("Creating LogFile")) 
-      		{ 
-        		$LogFile = New-Item "$docs\dbareports_ADD-DBRServerToInventory_$Date.txt" -ItemType File -ErrorAction Stop
-      		}
-    	}
-    	catch
-    	{
-      		Write-Warning "Failed to create log file please see error below"
-      		Write-Error $_
-     		Write-Output "You can find the install log here $($Logfile.FullName)- IF it managed to create it!"
-      		break
-
-    	}
-    	$LogFilePath = $LogFile.FullName
-    	Write-Output "Log filepath for install is $LogFilePath"
+        Write-PSFMessage -Level Verbose  -Message "Add-DbrServerToInventory started" -Tag "dbareports"
 
 		try 
 		{
-
-				  Get-Config
-			
+			Get-Config
 		}
 		catch 
 		{
-			Write-Log -path $LogFilePath -message "Get-Config Failed to run - $_" -Level Error
-			Write-Output "Something went wrong - The Beard is sad :-( . You can find the install log here $($Logfile.FullName)"
+            Write-PSFMessage -Level Warning -Message "Get-Config Failed to run" -ErrorRecord $_ -Tag "dbareports"
 		}
 		
 		$SqlServer = $script:SqlServer
