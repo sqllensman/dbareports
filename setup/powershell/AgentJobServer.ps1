@@ -1,201 +1,140 @@
+﻿<#
+ 
+ Collection script for SQLAgent Job Information                   
+ Needs to be tested with clusters. 
+ Needs to be tested using SQL Credential
+                     
+ Depends on dbatools and PSFramework
+
+ Database dependencies
+
+ Tables:    Staging.DbaSqlService
+            info.SqlServiceInfo
+            Monitoring.SqlServiceInfo
+
+ Views:     Staging.SqlServiceInfo 
+
+ SP:        Staging.SQLServiceInfoMerge
+ 
+ Agent Job: "dbareports - SQL Server Services Data Collector"
+
+#>
 <#
-# ROB IS THIS SUPPOSED TO KEEP HISTORICAL INFORMATION? IF SO $UPDATE WILL ALWAYS BE FALSE
 
-.SYNOPSIS 
-    Adds data to the DBA database for agent job results in a server list 
+    .SYNOPSIS 
+        Adds data to the DBA database for agent job results in a server list 
 
-.DESCRIPTION 
-    Connects to a server list and iterates though reading the agent job results and adds data to the DBA Database - This is run as an agent job on LD5v-SQL11n-I06
+    .DESCRIPTION 
+        Connects to a server list and iterates though reading the agent job results and adds data to the DBA Database - This is run as an agent job on LD5v-SQL11n-I06
 
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
+    .PARAMETER SqlCredential
+        Credentials to connect to the SQL Server instance if the calling user doesn't have permission.
 
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+    .PARAMETER RepositoryDatabase
+        The database containg the dbareports objects
 
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+    .PARAMETER $RepositoryQuery
+        The query used to determine the database(s) to process.
 
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+    .NOTES
+        Tags: Reports
+        License: MIT https://opensource.org/licenses/MIT
+ 
 #>
 [CmdletBinding()]
 Param (
-	[Alias("ServerInstance", "SqlInstance")]
-	[object]$SqlServer = "--installserver--",
+	[object]$RepositoryInstance = "W2016BASE\SQL2017",
 	[object]$SqlCredential,
-	[string]$InstallDatabase = "--installdb--",
-	[string]$LogFileFolder = "--logdir--"
+	# this will come much later
+	[string]$RepositoryDatabase = "dbareports",
+    [string]$RepositoryQuery = "Reporting.SQLInstanceList",
+	[string]$LogFileFolder = "D:\ITOPS\dbareports\Logs"
 )
 
 BEGIN
 {
-	# Load up shared functions
-	$currentdir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-	. "$currentdir\shared.ps1"
-	. "$currentdir\Write-Log.ps1"
-	
-	# Create Log File 
-	$Date = Get-Date -Format yyyyMMdd_HHmmss
-	$LogFilePath = $LogFileFolder + '\' + 'dbareports_AgentJobServer_' + $Date + '.txt'
-	try
-	{
-		Write-Log -path $LogFilePath -message "Agent Job Server Job started" -level info
-	}
-	catch
-	{
-		Write-error "Failed to create Log File at $LogFilePath"
-	}
-	
-	# Specify table name that we'll be inserting into
-	$table = "info.AgentJobServer"
-	$schema = $table.Split(".")[0]
-	$tablename = $table.Split(".")[1]
-	
+	# Load up shared functions (use dbatools instead of repeating code)
+    Import-Module -Name dbatools
+    Import-Module -Name PSFramework
+
+    Write-PSFMessage -Level Verbose  -Message "Agent Job Server Job started" -Tag "dbareports"
+
 	# Connect to dbareports server
 	try
 	{
-		Write-Log -path $LogFilePath -message "Connecting to $sqlserver" -level info
-		$sourceserver = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential -ErrorAction Stop 
+        Write-PSFMessage -Level Verbose  -Message "Connecting to $RepositoryInstance" -Tag "dbareports"
+        $SqlInstance = Connect-DbaInstance -SqlInstance $RepositoryInstance -Database $RepositoryDatabase 
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message "Failed to connect to $sqlserver - $_" -level Error
+        Write-PSFMessage -Level Warning -Message "Failed to connect to $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
+        continue
 	}
 
-	# Get columns automatically from the table on the SQL Server
-	# and creates the necessary $script:datatable with it
-	try
-	{
-		Write-Log -path $LogFilePath -message "Intitialising Datatable" -level info
-		Initialize-DataTable -ErrorAction Stop 
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Failed to initialise Data Table - $_" -level Error
-	}
 }
 
 PROCESS
 {
+	$DateChecked = Get-Date
 	try
 	{
-		Write-Log -path $LogFilePath -message "Getting Instances from $sqlserver" -level info
-		$sqlservers = Get-Instances
+        Write-PSFMessage -Level Verbose  -Message "Clearing the required Staging Tables" -Tag "dbareports"
+        $SqlInstance | Invoke-DbaSqlQuery -Query 'TRUNCATE TABLE Staging.DbaAgentJob' 
+         
+		Write-PSFMessage -Level Verbose  -Message "Getting a list of SQL Server Instances from the dbareports repository database - $RepositoryInstance"  -Tag "dbareports"
+		$sql = "SELECT InstanceID, ComputerName, instanceName, ConnectName FROM $RepositoryQuery"
+
+		$SqlServerInstances = $SqlInstance | Invoke-DbaSqlQuery -Query $sql 
+		Write-PSFMessage -Level Verbose  -Message "Got the list of SQL Server Instances from the dbareports repository database - $RepositoryInstance"  -Tag "dbareports"
+	
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message " Failed to get instances - $_" -level Error
+        Write-PSFMessage -Level Warning -Message "Failed to get list of SQL Server Instances from the dbareports repository database - $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
 		break
 	}
 	
-	# Get list of all servers already in the database
-	try
-	{
-		Write-Log -path $LogFilePath -message "Getting a list of servers from the dbareports database" -level info
-		$sql = "SELECT AgentJobServerID, InstanceID FROM $table"
-		$table = $sourceserver.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables[0]
-		Write-Log -path $LogFilePath -message "Got the list of servers from the dbareports database" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Can't get server list from $InstallDatabase on $($sourceserver.name). - $_" -level Error
-	}
-	
-	foreach ($sqlserver in $sqlservers)
+	foreach ($sqlserver in $SqlServerInstances)
 	{
 		$sqlservername = $sqlserver.ServerName
 		$InstanceName = $sqlserver.InstanceName
 		$InstanceId = $sqlserver.InstanceId
-		$update = $true
-		
-		# Checking for existing record and setting flag
-		$record = $table | Where-Object { $_.InstanceId -eq $InstanceID }
-		$key = $record.AgentJobServerID
-		
-		if ($key.count -eq 0)
-		{
-			$update = $false
-		}
-
-		if ($InstanceName -eq 'MSSQLServer')
-		{
-			$Connection = $sqlservername
-		}
-		else
-		{
-			$Connection = "$sqlservername\$InstanceName"
-		}
+        $Connection = $sqlserver.ConnectName
 		
 		# Connect to Instance
 		try
 		{
-			$server = Connect-SqlServer -SqlServer $Connection
-			Write-Log -path $LogFilePath -message "Connecting to $Connection" -level info
+            $SqlServerInstance = Connect-DbaInstance -SqlInstance $Connection
+			Write-PSFMessage -Level Verbose  -Message "Connecting to $Connection"  -Tag "dbareports"
 		}
-		catch
-		{
-			Write-Log -path $LogFilePath -message "Failed to connect to $Connection - $_" -level Warn
+		catch{
+            Write-PSFMessage -Level Warning -Message "Failed to connect to $Connection - $_ -ErrorRecord $_" -Tag "dbareports"
 			continue
 		}
-		
-		$jobs = $server.JobServer.jobs
-		$JobCount = $jobs.Count
-		$successCount = ($jobs | Where-Object { $_.LastRunOutcome -eq 'Succeeded' -and $_.IsEnabled -eq $true }).Count
-		$failedCount = ($jobs | Where-Object { $_.LastRunOutcome -eq 'Failed' -and $_.IsEnabled -eq $true }).Count
-		$UnknownCount = ($jobs | Where-Object { $_.LastRunOutcome -eq 'Unknown' -and $_.IsEnabled -eq $true }).Count
-		$JobsDisabled = ($jobs | Where-Object { $_.IsEnabled -eq $false }).Count
-		
-		try
-		{
-			$null = $datatable.rows.Add(
-			$key,
-			$(Get-Date),
-			$InstanceId,
-			$JobCount,
-			$successCount,
-			$failedCount,
-			$JobsDisabled,
-			$UnknownCount,
-			$Update)
+        
+		try {
+                $AgentJobInfo = $null
+          		Write-PSFMessage -Level Verbose  -Message "Collecting Get-DbaAgentJob data for $InstanceName"  -Tag "dbareports"          		
+                $AgentJobInfo = Get-DbaAgentJob -SqlInstance $SqlServerInstance | Select @{Name='InstanceId';Expression={$($InstanceId)}},InstanceName, @{Name='ReadingDate';Expression={get-date -Format "yyyy-MM-dd HH:mm:ss"}}, ComputerName, SqlInstance, 
+                    Enabled, Name, JobID, Description, CategoryID, Category, IsEnabled, HasSchedule, HasStep, StartStepID, DateCreated, DateLastModified, VersionNumber, OwnerLoginName, DeleteLevel, EmailLevel, OperatorToEmail, EventLogLevel, 
+                    LastRunDate, LastRunOutcome, NextRunDate, CurrentRunRetryAttempt, CurrentRunStatus, CurrentRunStep, CategoryType, JobType, OriginatingServer, HasServer | ConvertTo-DbaDataTable
+                
+                Write-PSFMessage -Level Verbose  -Message "Writing Get-DbaAgentJob data for $InstanceName"  -Tag "dbareports"
+                Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $AgentJobInfo -Table Staging.DbaAgentJob -KeepNulls
+		    }
+		catch {			 
+                Write-PSFMessage -Level Warning -Message "Failed to add Get-DbaAgentJob data for for $InstanceName" -ErrorRecord $_ -Tag "dbareports"
+			    continue
 		}
-		catch
-		{
-			Write-Log -path $LogFilePath -message "Failed to add Job to datatable - $_" -level Error
-			Write-Log -path $LogFilePath -message "Data = $key,
-			$(Get-Date),
-			$InstanceId,
-			$JobCount,
-			$successCount,
-			$failedCount,
-			$JobsDisabled,
-			$UnknownCount,
-			$Update" -level Error
-			continue
-		}
-	}
-	
-	$rowcount = $datatable.Rows.Count
-	
-	if ($rowcount -eq 0)
-	{
-		Write-Log -path $LogFilePath -message "No rows returned. No update required." -level info
-		continue
-	}
-	
-	try
-	{
-		Write-Log -path $LogFilePath -message "Attempting Import of $rowcount row(s)" -level info
-		Write-Tvp -ErrorAction Stop 
-		Write-Log -path $LogFilePath -message "Successfully Imported $rowcount row(s) of Agent Job Server into the $InstallDatabase on $($sourceserver.name)" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Bulk insert failed - $_" -level Error
-	}
+
+        Write-PSFMessage -Level Verbose  -Message "Completed collection for $InstanceName Closing Connection"  -Tag "dbareports" 
+        $SqlServerInstance.ConnectionContext.Disconnect()  
+	}	
 }
 
 END
 {
-	Write-Log -path $LogFilePath -message "Agent Job Server Finished"
-	$sourceserver.ConnectionContext.Disconnect()
+    Write-PSFMessage -Level Verbose  -Message "Agent Job Server Job Finished" -Tag "dbareports"
+	$SqlServerInstance.ConnectionContext.Disconnect()
 }
+

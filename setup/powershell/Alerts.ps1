@@ -1,77 +1,47 @@
-<#
-.SYNOPSIS  
-This Script will check all of the instances in the InstanceList and gather the Alerts Information to the info.Alerts table
+﻿<#
+    .SYNOPSIS  
+        This Script will check all of the instances in the Repository Query and gather the Alerts Information to the Staging.DbaAgentAlert table
 
-.DESCRIPTION 
-This Script will check all of the instances in the InstanceList and gather the Alerts Information to the info.Alerts table
+    .DESCRIPTION 
+        This Script will check all of the instances in the Repository Query and gather the Alerts Information to the Staging.DbaAgentAlert table
+        It uses the Get-DbaAgentAlert function from dbatools to Collect data.
 
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    .NOTES
+        Tags: Reports
+        License: MIT https://opensource.org/licenses/MIT
 
 #>
 [CmdletBinding()]
 Param (
-	[Alias("ServerInstance", "SqlInstance")]
-	[object]$SqlServer = "--installserver--",
+	[object]$RepositoryInstance = "W2016BASE\SQL2017",
 	[object]$SqlCredential,
-	[string]$InstallDatabase = "--installdb--",
-	[string]$LogFileFolder = "--logdir--"
+	# this will come much later
+	[string]$RepositoryDatabase = "dbareports",
+    [string]$RepositoryQuery = "Reporting.SQLInstanceList",
+	[string]$LogFileFolder = "D:\ITOPS\dbareports\Logs"
 )
 
 BEGIN
 {
-	# Load up shared functions
-	$currentdir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-	. "$currentdir\shared.ps1"
-	. "$currentdir\Write-Log.ps1"
-	# Create Log File 
-	$Date = Get-Date -Format yyyyMMdd_HHmmss
-	$LogFilePath = $LogFileFolder + '\' + 'dbareports_Alerts_' + $Date + '.txt'
-	try
-	{
-		Write-Log -path $LogFilePath -message "Alerts Job started" -level info
-	}
-	catch
-	{
-		Write-error "Failed to create Log File at $LogFilePath"
-	}
-		
-	# Specify table name that we'll be inserting into
-	$table = "info.Alerts"
-	$schema,$tablename = $table.Split(".")
-	
+	# Load up shared functions (use dbatools instead of repeating code)
+    Import-Module -Name dbatools
+    Import-Module -Name PSFramework
+
+    Set-PSFConfig -FullName 'psframework.logging.filesystem.logpath' -Value $LogFileFolder
+    Write-PSFMessage -Level Verbose  -Message "SQL Server Alerts Job started" -Tag "dbareports"
+
 	# Connect to dbareports server
 	try
 	{
-		Write-Log -path $LogFilePath -message "Connecting to $sqlserver" -level info
-		$sourceserver = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential -ErrorAction Stop 
+        Write-PSFMessage -Level Verbose  -Message "Connecting to $RepositoryInstance" -Tag "dbareports"
+        $SqlInstance = Connect-DbaInstance -SqlInstance $RepositoryInstance -Database $RepositoryDatabase 
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message "Failed to connect to $sqlserver - $_" -level Error
+        Write-PSFMessage -Level Warning -Message "Failed to connect to $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
+        continue
 	}
 
-	# Get columns automatically from the table on the SQL Server
-	# and creates the necessary $script:datatable with it
-	try
-	{
-        Write-Log -path $LogFilePath -message "Intitialising Datatable" -level info
-		Initialize-DataTable -ErrorAction Stop 
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "$datatable" -level Error
-        Write-Log -path $LogFilePath -message "Failed to initialise Data Table - $_" -level Error
-        Break
-	}
-	
 }
 
 PROCESS
@@ -79,190 +49,66 @@ PROCESS
 	$DateChecked = Get-Date
 	try
 	{
-		Write-Log -path $LogFilePath -message "Getting Instances from $sqlserver" -level info
-		$sqlservers = Get-Instances
+        Write-PSFMessage -Level Verbose  -Message "Clearing the required Staging Tables" -Tag "dbareports"
+        $SqlInstance | Invoke-DbaSqlQuery -Query 'TRUNCATE TABLE Staging.DbaAgentAlert' 
+         
+		Write-PSFMessage -Level Verbose  -Message "Getting a list of SQL Server Instances from the dbareports repository database - $RepositoryInstance"  -Tag "dbareports"
+		$sql = "SELECT InstanceID, ComputerName, instanceName, ConnectName FROM $RepositoryQuery"
+
+		$SqlServerInstances = $SqlInstance | Invoke-DbaSqlQuery -Query $sql 
+		Write-PSFMessage -Level Verbose  -Message "Got the list of SQL Server Instances from the dbareports repository database - $RepositoryInstance"  -Tag "dbareports"
+	
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message " Failed to get instances - $_" -level Error
+        Write-PSFMessage -Level Warning -Message "Failed to get list of SQL Server Instances from the dbareports repository database - $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
 		break
 	}
-
-	# Get list of all Alerts already in the database
-	try
-	{
-		Write-Log -path $LogFilePath -message "Getting a list of alerts from the dbareports database" -level info
-		$sql = "SELECT AlertsID, Name, InstanceID FROM $table"
-		$ExistingAlerts = $sourceserver.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables[0]
-		Write-Log -path $LogFilePath -message "Got the list of alerts from the dbareports database" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Can't get alerts list from $InstallDatabase on $($sourceserver.name). - $_" -level Error
-        Write-Log -path $LogFilePath -message "$_.Exception" -Level Error
-        Write-Log -path $LogFilePath -message "$_.Exception.InnerException" -Level Error
-	}
 	
-	foreach ($sqlserver in $sqlservers)
+	foreach ($sqlserver in $SqlServerInstances)
 	{
 		$sqlservername = $sqlserver.ServerName
 		$InstanceName = $sqlserver.InstanceName
 		$InstanceId = $sqlserver.InstanceId
-		if ($InstanceName -eq 'MSSQLServer')
-		{
-			$Connection = $sqlservername
-		}
-		else
-		{
-			$Connection = "$sqlservername\$InstanceName"
-		}
+        $Connection = $sqlserver.ConnectName
 		
 		# Connect to Instance
-		try
-		{
-			$server = Connect-SqlServer -SqlServer $Connection
-			Write-Log -path $LogFilePath -message "Connecting to $Connection" -level info
+		try {
+            $SqlServerInstance = Connect-DbaInstance -SqlInstance $Connection
+			Write-PSFMessage -Level Verbose  -Message "Connecting to $Connection"  -Tag "dbareports"
 		}
-		catch
-		{
-			Write-Log -path $LogFilePath -message "Failed to connect to $Connection - $_" -level Warn
+		catch{
+            Write-PSFMessage -Level Warning -Message "Failed to connect to $Connection - $_ -ErrorRecord $_" -Tag "dbareports"
 			continue
 		}
-		
-		foreach($Alert in $server.JobServer.Alerts)
+        
+		try {
+            $DbaAgentAlert = $null
+          	Write-PSFMessage -Level Verbose  -Message "Collecting Get-DbaAgentAlert data for $InstanceName"  -Tag "dbareports"
+            $DbaAgentAlert = Get-DbaAgentAlert -SqlInstance $SqlServerInstance | Select @{Name='InstanceId';Expression={$($InstanceId)}}, SqlInstance, @{Name='ReadingDate';Expression={get-date -Format "yyyy-MM-dd HH:mm:ss"}}, ComputerName, 
+                InstanceName, Name, CategoryName, DatabaseName, DelayBetweenResponses, EventDescriptionKeyword, EventSource, HasNotification, IncludeEventDescription, IsEnabled, JobID, JobName, LastOccurrenceDate, LastResponseDate, MessageID, 
+                NotificationMessage, OccurrenceCount, PerformanceCondition, Severity, WmiEventNamespace, WmiEventQuery | ConvertTo-DbaDataTable
 
- 		{
+            If ($DbaAgentAlert) {
+                Write-PSFMessage -Level Verbose  -Message "Writing Get-DbaAgentAlert data for $InstanceName"  -Tag "dbareports"
+                Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $DbaAgentAlert -Table Staging.DbaAgentAlert -KeepNulls -AutoCreateTable
+            }
+            else {
+                Write-PSFMessage -Level Verbose  -Message "Skipping Writing Get-DbaAgentAlert data for $InstanceName. No Alerts found"  -Tag "dbareports"
+            }
+		}
+		catch {			 
+                Write-PSFMessage -Level Warning -Message "Failed to add Get-DbaAgentJob data for for $InstanceName" -ErrorRecord $_ -Tag "dbareports"
+			    continue
+		}
 
-    		$LastOccurrenceDate = $Alert.LastOccurrenceDate
-			if ($LastOccurrenceDate -eq '01/01/0001 00:00:00') 
-			{ 
-				$LastOccurrenceDate = $null 
-			} 
-
-    		$LastResponseDate =  $Alert.LastResponseDate
-			if ($LastResponseDate -eq '01/01/0001 00:00:00') 
-			{ 
-				$LastResponseDate = $null 
-			} 
-
-    		if($Alert.WmiEventQuery)
-			{
-				$WmiEventQuery = $Alert.WmiEventQuery.Replace("'","''")
-			}
-
-			# Check for existing alerts
-			$record = $ExistingAlerts| Where-Object { $_.Name -eq $Alert.name -and $_.InstanceId -eq $InstanceID }
-			$key = $record.AlertsID
-			$update = $true
-			
-			if ($key.count -eq 0)
-			{
-				$update = $false
-			}
-
-			try
-			{
-				$null = $datatable.rows.Add(
-				$key,
-				$DateChecked,
-				$InstanceID,
-				$($Alert.Name),
-				$($Alert.Category),
- 				$($Alert.DatabaseID),
- 				$($Alert.DelayBetweenResponses),
- 				$($Alert.EventDescriptionKeyword),
- 				$($Alert.EventSource),
- 				$($Alert.HasNotification),
- 				$($Alert.IncludeEventDescription),
- 				$($Alert.IsEnabled),
- 				$($Alert.AgentJobDetailID),
- 				$($LastOccurrenceDate),
- 				$($LastResponseDate),
- 				$($Alert.MessageID),
- 				$($Alert.NotificationMessage),
- 				$($Alert.OccurrenceCount),
- 				$($Alert.PerformanceCondition),
- 				$($Alert.Severity),
- 				$($Alert.WmiEventNamespace),
- 				$($Alert.WmiEventQuery),
-				$Update
-				)
-			}
-			catch
-			{
-				Write-Log -path $LogFilePath -Message "Failed to add Alert Information to the datatable - $_" -Level Error
-				Write-Log -path $LogFilePath -Message "Data is $key,
-				$DateChecked,
-				$InstanceID,
-				$($Alert.Name),
-				$($Alert.Category),
- 				$($Alert.DatabaseID),
- 				$($Alert.DelayBetweenResponses),
- 				$($Alert.EventDescriptionKeyword),
- 				$($Alert.EventSource),
- 				$($Alert.HasNotification),
- 				$($Alert.IncludeEventDescription),
- 				$($Alert.IsEnabled),
- 				$($Alert.AgentJobDetailID),
- 				$($Alert.LastOccurrenceDate),
- 				$($Alert.LastResponseDate),
- 				$($Alert.MessageID),
- 				$($Alert.NotificationMessage),
- 				$($Alert.OccurrenceCount),
- 				$($Alert.PerformanceCondition),
- 				$($Alert.Severity),
- 				$($Alert.WmiEventNamespace),
- 				$($Alert.WmiEventQuery),
-				$Update"
-				continue
-			}
-        } #End foreach ALerts
-    }#End foreach Servers
-    $rowcount = $datatable.Rows.Count
-	
-	if ($rowcount -eq 0)
-	{
-		Write-Log -path $LogFilePath -message "No rows returned. No update required." -level info
-		continue
-	}
-	
-	try
-	{
-		Write-Log -path $LogFilePath -message "Attempting Import of $rowcount row(s)" -level info
-		Write-Tvp -ErrorAction Stop 
-		Write-Log -path $LogFilePath -message "Successfully Imported $rowcount row(s) of Alerts into the $InstallDatabase on $($sourceserver.name)" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Bulk insert failed - $_" -level Error
-Write-Log -path $LogFilePath -Message "Data is $key,
-				$DateChecked,
-				$InstanceID,
-				$($Alert.Name),
-				$($Alert.Category),
- 				$($Alert.DatabaseID),
- 				$($Alert.DelayBetweenResponses),
- 				$($Alert.EventDescriptionKeyword),
- 				$($Alert.EventSource),
- 				$($Alert.HasNotification),
- 				$($Alert.IncludeEventDescription),
- 				$($Alert.IsEnabled),
- 				$($Alert.AgentJobDetailID),
- 				$($Alert.LastOccurrenceDate),
- 				$($Alert.LastResponseDate),
- 				$($Alert.MessageID),
- 				$($Alert.NotificationMessage),
- 				$($Alert.OccurrenceCount),
- 				$($Alert.PerformanceCondition),
- 				$($Alert.Severity),
- 				$($Alert.WmiEventNamespace),
- 				$($Alert.WmiEventQuery),
-				$Update"
-	}
+        Write-PSFMessage -Level Verbose  -Message "Completed collection for $InstanceName Closing Connection"  -Tag "dbareports" 
+        $SqlServerInstance.ConnectionContext.Disconnect()  
+	}	
 }
 
 END
 {
-	Write-Log -path $LogFilePath -message "Alerts Finished"
-	$sourceserver.ConnectionContext.Disconnect()
+    Write-PSFMessage -Level Verbose  -Message "SQL Server Alerts Job Finished" -Tag "dbareports"
+	$SqlServerInstance.ConnectionContext.Disconnect()
 }

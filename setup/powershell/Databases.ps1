@@ -1,28 +1,22 @@
-<#
-.SYNOPSIS  
-This Script will check all of the instances in the InstanceList and gather the Database name and size to the Info.Databases table
+﻿<#
+    .SYNOPSIS  
+        This Script will check all of the instances in the InstanceList and gather the Database name and size to the Info.Databases table
 
-.DESCRIPTION 
-This Script will check all of the instances in the InstanceList and gather the Database name and size to the Info.Databases table
+    .DESCRIPTION 
+        This Script will check all of the instances in the InstanceList and gather the Database name and size to the Info.Databases table
 
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    .NOTES 
+        Tags: Reports
+        License: MIT https://opensource.org/licenses/MIT
 
 #>
 [CmdletBinding()]
 Param (
 	[Alias("ServerInstance", "SqlInstance")]
-	[object]$SqlServer = "--installserver--",
+	[object]$SqlServer = "LGHBDB17",
 	[object]$SqlCredential,
-	[string]$InstallDatabase = "--installdb--",
-	[string]$LogFileFolder = "--logdir--"
+	[string]$InstallDatabase = "dbareports",
+	[string]$LogFileFolder = "D:\ITOPS\dbareports\Logs"
 )
 
 BEGIN
@@ -330,3 +324,4 @@ END
 	Write-Log -path $LogFilePath -message "Databases Finished"
 	$sourceserver.ConnectionContext.Disconnect()
 }
+

@@ -1,218 +1,122 @@
+﻿<#
+ Collection script for Computer level Disk information inculding Diskspace                  
+ Needs to be tested with clusters. 
+ Needs to be tested using SQL Credential
+
+ Depends on dbatools and PSFramework
+
+ Database dependencies
+
+ Tables:    Staging.DbaDiskSpace
+            info.DiskSpaceInfo
+            Monitoring.DiskSpaceInfo
+
+ Views:     Staging.DiskSpaceInfo 
+
+ SP:        Staging.DiskSpaceInfoMerge
+
+ Agent Job: "dbareports - Disk Space Data Collector"
+
+#>
 <#
-.SYNOPSIS  
-This Script will check all of the instances in the InstanceList and gather the Windows Info and save to the Info.ServerInfo table
+    .SYNOPSIS
+        Adds disk information to the dbareports repository database for Computers defined in view against info.ComputerList
+  
+    .DESCRIPTION 
+        This Script will check all of the Computers from a Repository view defined against the info.ComputerList. 
+        Collects the Disk level Infomation and save to the info.DiskSpaceInfo (summary) and Monitoring.DiskSpaceInfo
+        
+        It collects data from the following dbatools.io functions:
+            Resolve-DbaNetworkName
+            Get-DbaComputerSystem
+            Get-DbaOperatingSystem
+            Get-DbaPageFileSetting
+        
+        Running this script requires both dbatools and PSFramework be installed on the Monitoring Server
 
-.DESCRIPTION 
-This Script will check all of the instances in the InstanceList and gather the Windows Info and save to the Info.ServerInfo table
-
-.NOTES 
-dbareports PowerShell module (https://dbareports.io, SQLDBAWithABeard.com)
-Copyright (C) 2016 Rob Sewell
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    .NOTES
+        Tags: Reports
+        License: MIT https://opensource.org/licenses/MIT
 
 #>
 
 [CmdletBinding()]
 Param (
-	[Alias("ServerInstance", "SqlInstance")]
-	[object]$SqlServer = "--installserver--",
+	[Alias("SqlInstance")]
+	[object]$RepositoryInstance = "W2016BASE\SQL2017",
 	[object]$SqlCredential,
-	[string]$InstallDatabase = "--installdb--",
-	[string]$LogFileFolder = "--logdir--"
+	[string]$RepositoryDatabase = "dbareports",
+    [string]$RepositoryQuery = "Reporting.ActiveComputers",
+	[string]$LogFileFolder = "D:\ITOPS\dbareports\Logs"
 )
 
 BEGIN
 {
-	# Load up shared functions
-	$currentdir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-	. "$currentdir\shared.ps1"
-	. "$currentdir\Write-Log.ps1"
-	# Create Log File 
-	$Date = Get-Date -Format yyyyMMdd_HHmmss
-	$LogFilePath = $LogFileFolder + '\' + 'dbareports_DiskSpace_' + $Date + '.txt'
-	try
-	{
-		Write-Log -path $LogFilePath -message "DiskSpace Job started" -level info
-	}
-	catch
-	{
-		Write-error "Failed to create Log File at $LogFilePath"
-	}
+	# Load up shared functions (use dbatools instead of repeating code)
+    Import-Module -Name dbatools
+    Import-Module -Name PSFramework
 
-	# Specify table name that we'll be inserting into
-	$table = "info.DiskSpace"
-	$schema = $table.Split(".")[0]
-	$tablename = $table.Split(".")[1]
+    Write-PSFMessage -Level Verbose  -Message "DiskSpace Job started" -Tag "dbareports"
 	
 	# Connect to dbareports server
 	try
 	{
-		Write-Log -path $LogFilePath -message "Connecting to $sqlserver" -level info
-		$sourceserver = Connect-SqlServer -SqlServer $sqlserver -SqlCredential $SqlCredential -ErrorAction Stop 
+		Write-PSFMessage -Level Verbose -Message "Connecting to $RepositoryInstance" -Tag "dbareports"       
+        $SqlInstance = Connect-DbaInstance -SqlInstance $RepositoryInstance -Database $RepositoryDatabase
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message "Failed to connect to $sqlserver - $_" -level Error
-	}
-
-	# Get columns automatically from the table on the SQL Server
-	# and creates the necessary $script:datatable with it
-	try
-	{
-		Write-Log -path $LogFilePath -message "Intitialising Datatable" -level info
-		Initialize-DataTable -ErrorAction Stop 
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Failed to initialise Data Table - $_" -level Error
-	}
-	
+        Write-PSFMessage -Level Warning -Message "Failed to connect to $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
+	}	
 }
 
 PROCESS
 {
-	$DateChecked = Get-Date
-
 	try
 	{
-		Write-Log -path $LogFilePath -message "Getting a list of servers from the dbareports database" -level info
-		$sql = "SELECT DISTINCT ServerID, ServerName FROM dbo.instancelist"
-		$sqlservers = $sourceserver.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables[0]
-		Write-Log -path $LogFilePath -message "Got the list of servers from the dbareports database" -level info
+
+        Write-PSFMessage -Level Verbose -Message "Clearing the required Staging Tables" -Tag "dbareports"
+        $SqlInstance | Invoke-DbaSqlQuery -Query 'TRUNCATE TABLE Staging.DbaDiskSpace' 
+
+        Write-PSFMessage -Level Verbose -Message "Getting a list of ComputerNames from the dbareports repository database - $RepositoryInstance" -Tag "dbareports"
+		$sql = "SELECT ComputerName FROM $RepositoryQuery"
+
+		$ComputerList = $SqlInstance | Invoke-DbaSqlQuery -Query $sql 
+		Write-PSFMessage -Level Verbose -Message "Got the list of ComputerNames from the dbareports repository database - $RepositoryInstance" -Tag "dbareports"
 	
 	}
 	catch
 	{
-		Write-Log -path $LogFilePath -message " Failed to get instances - $_" -level Error
+        Write-PSFMessage -Level Warning -Message "Failed to get list of ComputerNames from the dbareports repository database - $RepositoryInstance" -ErrorRecord $_ -Tag "dbareports"
 		break
 	}
-
-	# Get list of all servers already in the database
-	try
-	{
-		Write-Log -path $LogFilePath -message "Getting a list of servers from the dbareports database" -level info
-		$sql = "SELECT a.DiskSpaceID, a.DiskName, b.ServerID, b.ServerName FROM $table a JOIN info.Serverinfo b on a.ServerId = b.ServerId"
-		$table = $sourceserver.Databases[$InstallDatabase].ExecuteWithResults($sql).Tables[0]
-		Write-Log -path $LogFilePath -message "Got the list of servers from the dbareports database" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Can't get server list from $InstallDatabase on $($sourceserver.name). - $_" -level Error
-	}
 	
-	foreach ($server in $sqlservers)
+	foreach ($Computer in $ComputerList)
 	{
-		$ServerName = $server.ServerName
-		$ServerId = $server.ServerId
-		$date = Get-Date
-		
-		Write-Log -path $LogFilePath -message "Processing $ServerName" -level info
+		$ComputerName = $Computer.ComputerName		
+		Write-PSFMessage -Level Verbose -Message "Processing $ComputerName" -Tag "dbareports"
+
 		try
 		{
-			$ipaddr = Resolve-SqlIpAddress $ServerName
+            $DiskInfo = $null
+          	Write-PSFMessage -Level Verbose -Message "Collecting Get-DbaDiskSpace for $ComputerName" -Tag "dbareports"          		
+            $DiskInfo = Get-DbaDiskSpace -ComputerName $ComputerName | SELECT ComputerName, @{Name='ReadingDate';Expression={get-date -Format "yyyy-MM-dd HH:mm:ss"}}, Name, Label, PercentFree, BlockSize, FileSystem, IsSqlDisk, DriveType, SizeInBytes, FreeInBytes | ConvertTo-DbaDataTable
+
+            Write-PSFMessage -Level Verbose -Message "Writing Get-DbaDiskSpace for $ComputerName" -Tag "dbareports"
+            Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $DiskInfo -Table Staging.DbaDiskSpace
 		}
 		catch
 		{
-			$ipaddr = Resolve-IpAddress $servername
-		}
-		
-		if ($ipaddr -eq $null)
-		{
-			Write-Log -path $LogFilePath -message "Could not resolve IP address for $ServerName. Moving on." -level info
-			Write-Log -path $LogFilePath -message "Tried Resolve-SqlIpAddress $ServerName and Resolve-IpAddress $servername"
+            Write-PSFMessage -Level Warning -Message "Failed to add Get-DbaDiskSpace data for $ComputerName" -ErrorRecord $_ -Tag "dbareports"
 			continue
-		}
-		
-		try
-		{
-			$query = "Select SystemName, Name, DriveType, FileSystem, FreeSpace, Capacity, Label, BlockSize from Win32_Volume where DriveType = 2 or DriveType = 3"
-			$disks = Get-WmiObject -ComputerName $ipaddr -Query $query | Sort-Object -Property Name
-		}
-		catch
-		{
-			Write-Log -path $LogFilePath -message "Could not connect to WMI on $ServerName. " -level Warn
-			continue
-		}
-		
-		foreach ($disk in $disks)
-		{
-			$diskname = $disk.name
-			if (!$diskname.StartsWith("\\"))
-			{
-				$update = $true
-				$row = $table | Where-Object { $_.DiskName -eq $DiskName -and $_.ServerId -eq $ServerId} | Sort-Object -Property Date | Select-Object -First 1
-				$key = $row.DiskSpaceID
-				
-				if ($key.count -eq 0)
-				{
-					$update = $false
-				}
-				
-				$total = "{0:f2}" -f ($disk.Capacity/1gb)
-				$free = "{0:f2}" -f ($disk.Freespace/1gb)
-				$percentfree = "{0:n0}" -f (($disk.Freespace / $disk.Capacity) * 100)
-				
-				# to see results as they come in, skip $null=
-				try
-				{
-					$Null = $datatable.Rows.Add(
-					$key,
-					$Date,
-					$ServerId,
-					$diskname,
-					$disk.Label,
-					$total,
-					$free,
-					$percentfree,
-					$Update)
-
-					Write-Log -path $LogFilePath -message "Adding $diskname for $ServerName" -level info
-				}
-				catch
-				{
-					Write-Log -path $LogFilePath -message "Failed to add Job to datatable - $_" -level Error
-					Write-Log -path $LogFilePath -message "Data = $key,
-					$Date,
-					$ServerId,
-					$diskname,
-					$($disk.Label),
-					$total,
-					$free,
-					$percentfree,
-					$Update" -level Warn
-					continue
-				}
-			}
 		}
 
 	}
 	
-	$rowcount = $datatable.Rows.Count
-	
-	if ($rowcount -eq 0)
-	{
-		Write-Log -path $LogFilePath -message "No rows returned. No update required." -level info
-		continue
-	}
-	
-	try
-	{
-		Write-Log -path $LogFilePath -message "Attempting Import of $rowcount row(s)" -level info
-		Write-Tvp -ErrorAction Stop 
-		Write-Log -path $LogFilePath -message "Successfully Imported $rowcount row(s) of DiskSpace into the $InstallDatabase on $($sourceserver.name)" -level info
-	}
-	catch
-	{
-		Write-Log -path $LogFilePath -message "Bulk insert failed - $_" -level Error
-	}
 }
 
 END
 {
-	Write-Log -path $LogFilePath -message "DiskSpace Finished"
+	Write-PSFMessage -Level Verbose -Message "DiskSpace Job Finished" -Tag "dbareports"
+    $SqlInstance.ConnectionContext.Disconnect()
 }

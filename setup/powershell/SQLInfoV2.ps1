@@ -1,14 +1,58 @@
 ﻿<#
-    .SYNOPSIS  
-         This Script will check all of the instances in the InstanceList and gather SQL Configuration Info and save to the Info.SQLInfo table
+ Collection script for SQLServer Instance level information (including databases)                   
+ Needs to be tested with clusters. 
+ Needs to be tested using SQL Credential
+                     
+ Depends on dbatools and PSFramework
+
+ Database dependencies
+
+ Tables:    Staging.DbaSqlInstanceProperty
+            Staging.DbaSqlInstance 
+            Staging.DbaDatabase
+            Staging.DbaDatabaseFile
+
+            info.SQLInstanceInfo
+            info.SQLInstancePropertyInfo
+            info.DatabaseInfo
+            Monitoring.SQLInstanceInfo
+            Monitoring.SQLInstancePropertyInfo
+            Monitoring.DatabaseInfo
+            Monitoring.DatabaseFileInfo
+
+
+ Views:     Staging.SQLInstanceInfo 
+            Staging.SQLInstancePropertyInfo
+            Staging.DatabaseInfo
+            Staging.DatabaseFileInfo
+
+ SP:        Staging.SQLInstanceInfoMerge
+            Staging.SqlInstancePropertyInfoAdd
+            Staging.DatabaseInfoMerge
+            Staging.DatabaseFileInfoAdd
+
+ Agent Job: "dbareports - SQL Server Instance Data Collector"
+
+#>
+
+<#
+    .SYNOPSIS 
+        Adds Instance and Database level information to the dbareports repository database for Instances defined in view against info.SqlInstanceList
 
     .DESCRIPTION 
-         This Script will check all of the instances in the InstanceList and gather SQL Configuration Info and save to the Info.SQLInfo table
-
+        This Script will check all of the SQL Server Instances from a Repository view defined against the info.SQLInstanceList
+        It collects data from the following dbatools.io functions:
+            Get-DbaSqlInstanceProperty
+            Get-DbaSqlInstanceInfo
+            Get-DbaDatabase
+            Get-DbaDatabaseFile
+        
+        Running this script requires both dbatools and PSFramework be installed on the Monitoring Server
+    
     .NOTES
         Tags: Reports
         License: MIT https://opensource.org/licenses/MIT
-
+        
 #>
 [CmdletBinding()]
 Param (
@@ -98,108 +142,14 @@ PROCESS
 		}
         
         # Get Instance Scoped Information
-        try {
-            # Pre-process
-            $VersionMajor = $SqlServerInstance.VersionMajor
-            $VersionMinor = $SqlServerInstance.VersionMinor
-            if ($VersionMajor -eq 8)
-            { $Version = 'SQL 2000' }
-            if ($VersionMajor -eq 9)
-            { $Version = 'SQL 2005' }
-            if ($VersionMajor -eq 10 -and $VersionMinor -eq 0)
-            { $Version = 'SQL 2008' }
-            if ($VersionMajor -eq 10 -and $VersionMinor -eq 50)
-            { $Version = 'SQL 2008 R2' }
-            if ($VersionMajor -eq 11)
-            { $Version = 'SQL 2012' }
-            if ($VersionMajor -eq 12)
-            { $Version = 'SQL 2014' }
-            if ($VersionMajor -eq 13)
-            { $Version = 'SQL 2016' }
-            if ($VersionMajor -eq 14)
-            { $Version = 'SQL 2017' }		
+		try {
+            Write-PSFMessage -Level Verbose  -Message "Collecting Get-DbaSqlInstanceInfo data for $InstanceName"  -Tag "dbareports" 
+            $InstanceDataObject = Get-DbaSqlInstanceInfo -SqlServer $SqlServerInstance | Select @{Name='InstanceId';Expression={$($InstanceId)}}, @{Name='InstanceName';Expression={$($InstanceName)}}, @{Name='ReadingDate';Expression={get-date -Format "yyyy-MM-dd HH:mm:ss"}},  
+                ComputerName, VersionString, VersionName, Edition, ServicePack, ServerType, Collation, IsCaseSensitive, IsHADREnabled, HADREndpointPort, IsSQLClustered, ClusterName,
+                ClusterQuorumstate, ClusterQuorumType, AGs, AGListener, SQLService, SQLServiceAccount, SQLServiceStartMode, SQLAgentServiceAccount, SQLAgentServiceStartMode, BrowserAccount, BrowserStartMode, DefaultFile,
+                DefaultLog, BackupDirectory,InstallDataDirectory, InstallSharedDirectory, MasterDBPath, MasterDBLogPath, ErrorLogPath, IsFullTextInstalled, LinkedServer, LoginMode, TcpEnabled, NamedPipesEnabled, C2AuditMode, 
+                CommonCriteriaComplianceEnabled, CostThresholdForParallelism, DBMailEnabled, DefaultBackupCompression, FillFactor, MaxDegreeOfParallelism, MaxMem, MinMem, OptimizeAdhocWorkloads, RemoteDacEnabled, XPCmdShellEnabled | ConvertTo-DbaDataTable
 
-            if ($SqlServerInstance.IsHadrEnabled -eq $True)
-            {
-	            $IsHADREnabled = $True
-	            $AGs = $SqlServerInstance.AvailabilityGroups | Select-Object Name -ExpandProperty Name | Out-String
-	            $Expression = @{ Name = 'ListenerPort'; Expression = { $_.Name + ',' + $_.PortNumber } }
-	            $AGListener = $SqlServerInstance.AvailabilityGroups.AvailabilityGroupListeners | Select-Object $Expression | Select-Object ListenerPort -ExpandProperty ListenerPort
-            }
-            else
-            {
-	            $IsHADREnabled = $false
-	            $AGs = 'None'
-	            $AGListener = 'None'
-            }
-		
-            if ($SqlServerInstance.version.Major -eq 8) # Check for SQL 2000 boxes
-            {
-	            $HADREndpointPort = '0'
-            }
-            else
-            {
-	            $HADREndpointPort = ($SqlServerInstance.Endpoints | Where-Object{ $_.EndpointType -eq 'DatabaseMirroring' }).Protocol.Tcp.ListenerPort
-            }
-            if (!$HADREndpointPort)
-            {
-	            $HADREndpointPort = '0'
-            }
-
-            $InstanceDataObject = [PSCustomObject]@{
-                'InstanceId' = $InstanceId
-                'InstanceName' = $InstanceName
-                'ReadingDate' = $DateChecked
-                'ComputerName'=$SqlServerInstance.ComputerNamePhysicalNetBIOS             
-                'VersionString' = $SqlServerInstance.VersionString
-                'VersionName' = $Version
-                'Edition' = $SqlServerInstance.Edition
-                'ServicePack' = $SqlServerInstance.ProductLevel
-                'ServerType' = $SqlServerInstance.ServerType
-                'Collation' = $SqlServerInstance.Collation
-                'IsCaseSensitive' = $SqlServerInstance.IsCaseSensitive
-                'IsHADREnabled' = $IsHADREnabled
-                'HADREndpointPort' = $HADREndpointPort        
-                'IsSQLClustered' =  $SqlServerInstance.IsClustered
-                'ClusterName' = $SqlServerInstance.ClusterName
-                'ClusterQuorumstate' = $SqlServerInstance.ClusterQuorumState
-                'ClusterQuorumType' = $SqlServerInstance.ClusterQuorumType
-                'AGs' = $AGs
-                'AGListener' = $AGListener
-                'SQLService' = $SqlServerInstance.ServiceName
-                'SQLServiceAccount' = $SqlServerInstance.ServiceAccount
-                'SQLServiceStartMode' = $SqlServerInstance.ServiceStartMode
-                'SQLAgentServiceAccount' = $SqlServerInstance.JobServer.ServiceAccount
-                'SQLAgentServiceStartMode' = $SqlServerInstance.JobServer.ServiceStartMode
-                'BrowserAccount'=$SqlServerInstance.BrowserServiceAccount
-                'BrowserStartMode' = $SqlServerInstance.BrowserStartMode
-                'DefaultFile' = $SqlServerInstance.DefaultFile
-                'DefaultLog' = $SqlServerInstance.DefaultLog
-                'BackupDirectory'=$SqlServerInstance.BackupDirectory;
-                'InstallDataDirectory' = $SqlServerInstance.InstallDataDirectory
-                'InstallSharedDirectory' = $SqlServerInstance.InstallSharedDirectory
-                'MasterDBPath' = $SqlServerInstance.MasterDBPath
-                'MasterDBLogPath' = $SqlServerInstance.MasterDBLogPath
-                'ErrorLogPath' = $SqlServerInstance.ErrorLogPath        
-                'IsFullTextInstalled' = $SqlServerInstance.IsFullTextInstalled
-                'LinkedServer' = $SqlServerInstance.LinkedServers.Count
-                'LoginMode' = $SqlServerInstance.LoginMode
-                'TcpEnabled' = $SqlServerInstance.TcpEnabled
-                'NamedPipesEnabled' = $SqlServerInstance.NamedPipesEnabled
-                'C2AuditMode' = $SqlServerInstance.Configuration.C2AuditMode.RunValue
-                'CommonCriteriaComplianceEnabled' = $SqlServerInstance.Configuration.CommonCriteriaComplianceEnabled.RunValue
-                'CostThresholdForParallelism' = $SqlServerInstance.Configuration.CostThresholdForParallelism.RunValue
-                'DBMailEnabled' = $SqlServerInstance.Configuration.DatabaseMailEnabled.RunValue
-                'DefaultBackupCompression' = $SqlServerInstance.Configuration.DefaultBackupCompression.RunValue
-                'FillFactor' = $SqlServerInstance.Configuration.FillFactor.RunValue
-                'MaxDegreeOfParallelism' = $SqlServerInstance.Configuration.MaxDegreeOfParallelism.RunValue
-                'MaxMem' = $SqlServerInstance.Configuration.MaxServerMemory.RunValue
-                'MinMem' = $SqlServerInstance.Configuration.MinServerMemory.RunValue
-                'OptimizeAdhocWorkloads' = $SqlServerInstance.Configuration.OptimizeAdhocWorkloads.RunValue
-                'RemoteDacEnabled' = $SqlServerInstance.Configuration.RemoteDacConnectionsEnabled.RunValue
-                'XPCmdShellEnabled' = $SqlServerInstance.Configuration.XPCmdShellEnabled.RunValue  
-            }
-            
             Write-PSFMessage -Level Verbose  -Message "Writing Sql Server Instance data for $InstanceName"  -Tag "dbareports"
             Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $InstanceDataObject -Table Staging.DbaSqlInstance -KeepNulls
 		}
@@ -218,8 +168,6 @@ PROCESS
               DelayedDurability,Trustworthy,DatabaseOwnershipChaining,TemporalHistoryRetentionEnabled,HasMemoryOptimizedObjects,DefaultFileStreamFileGroup,FilestreamDirectoryName,FilestreamNonTransactedAccess | ConvertTo-DbaDataTable
 
             Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $databaseInfo -Table Staging.DbaDatabase -KeepNulls 
-
-
         }
         catch {			
             Write-PSFMessage -Level Warning -Message "Failed to add Database Scoped data for for $InstanceName" -ErrorRecord $_ -Tag "dbareports"
@@ -232,10 +180,10 @@ PROCESS
                 NextGrowthEventSize, Size, UsedSpace, AvailableSpace, IsOffline, IsReadOnly, IsReadOnlyMedia, IsSparse, NumberOfDiskWrites, NumberOfDiskReads, ReadFromDisk, WrittenToDisk, VolumeFreeSpace, FileGroupDataSpaceId, 
                 FileGroupType, FileGroupTypeDescription, FileGroupDefault, FileGroupReadOnly | ConvertTo-DbaDataTable
             
-            Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $databaseFileInfo -Table Staging.DbaDbaDatabaseFile -KeepNulls
+            Write-DbaDataTable -SqlInstance $SqlInstance -Database $RepositoryDatabase -InputObject $databaseFileInfo -Table Staging.DbaDatabaseFile -KeepNulls
         }
         catch {           
-            Write-PSFMessage -Level Warning -Message "Failed to add Database Scoped data for for $InstanceName" -ErrorRecord $_ -Tag "dbareports"
+            Write-PSFMessage -Level Warning -Message "Failed to add DatabaseFile data for for $InstanceName" -ErrorRecord $_ -Tag "dbareports"
             continue
         }
 
