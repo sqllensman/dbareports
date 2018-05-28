@@ -5,7 +5,7 @@
 #
 # Generated on: 8th December 2016
 #
-# Updated on: 19 July 2017
+# Updated on: 09 May 2018
 #
 @{
 	
@@ -13,25 +13,25 @@
 	RootModule = 'dbareports.psm1'
 	
 	# Version number of this module.
-	ModuleVersion = '0.9.0'
+	ModuleVersion = '0.9.2.001'
 	
 	# ID used to uniquely identify this module
 	GUID = '654a8346-35f1-4592-a1b5-0ee472fab074'
 	
-	# Author of this module
-	Author = 'SQL Collaborative - Initial Author Rob Sewell'
-	
-	# Company or vendor of this module
-	CompanyName = 'SQL Collaborative'
-	
-	# Copyright statement for this module
-	Copyright = '2016 Rob Sewell'
-	
-	# Description of the functionality provided by this module
-	Description = 'Dopest dba dashboards ever'
+    # Author of this module
+    Author                 = 'SQL Community Collaborative'
+    
+    # Company or vendor of this module
+    CompanyName            = 'SQL Community Collaborative'
+    
+    # Copyright statement for this module
+    Copyright              = '(c) 2017. All rights reserved.'
+    
+    # Description of the functionality provided by this module
+    Description            = 'SQL Server Inventory Reporting'
 	
 	# Minimum version of the Windows PowerShell engine required by this module
-	PowerShellVersion = '3.0'
+	PowerShellVersion = '4.0'
 	
 	# Name of the Windows PowerShell host required by this module
 	PowerShellHostName = ''
@@ -49,7 +49,11 @@
 	ProcessorArchitecture = ''
 	
 	# Modules that must be imported into the global environment prior to importing this module
-	RequiredModules = @()
+    RequiredModules        = @(
+        @{ ModuleName = 'Pester'; ModuleVersion = '4.2.0' },
+        @{ ModuleName = 'dbatools'; ModuleVersion = '0.9.300' }
+        @{ ModuleName = 'PSFramework'; ModuleVersion = '0.9.10.23' }
+    )
 	
 	# Assemblies that must be loaded prior to importing this module
 	RequiredAssemblies= @('Microsoft.SqlServer.Smo','Microsoft.SqlServer.SmoExtended')
@@ -67,23 +71,21 @@
 	NestedModules = @()
 	
 	# Functions to export from this module
-	FunctionsToExport = @('Install-DbaReports',
-		'Add-DbrCredential',
-		'Add-DbrAgentJob',
-		'New-DbrAgentJobCategory',
-		'Uninstall-DbaReports',
-		'Add-DbrServerToInventory',
-		'Get-DbrAllInfo',
-		'Remove-DbrServerFromInventory',
-		'Test-dbrSqlPath',
-		'Install-DbaReportsClient',
-		'Set-DbrInstanceInactiveInInventory',
-		'Get-DbrConfig',
-		'Get-DbrAgentJob',
-		'Get-DbrInstanceList',
-		'New-DbrSqlAlias',
-		'Get-DbrNewJob',
-        'Write-Log'
+	FunctionsToExport = @(
+        'Add-DbrAgentJob',
+        'Add-DbrCredential',
+        'Add-DbrServerToInventory',
+        'Export-DbrConfig',
+        'Get-DbrAgentJob',
+        'Get-DbrConfig',
+        'Get-DbrConfigValue',
+        'Import-DbrConfig',
+        'Install-DbaReports',
+        'Install-DbaReportsClient',
+        'Remove-DbrServerFromInventory',
+        'Set-DbrConfig',
+        'Set-DbrInstanceInactiveInInventory',
+        'Uninstall-DbaReports'
 	)
 	
 	# Cmdlets to export from this module
@@ -120,7 +122,7 @@
         ProjectUri = "https://dbareports.io"
 
         # The web address of this module's license. Points to a page that's embeddable and linkable.
-        LicenseUri = "http://www.gnu.org/licenses/gpl-3.0.en.html"
+        LicenseUri   = "https://opensource.org/licenses/MIT"
 
         # Release notes for this particular version of the module
         # ReleaseNotes = False
