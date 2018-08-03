@@ -64,7 +64,7 @@
 			try
 			{
 				Write-Output "Removing $instance"
-				$null = $sourceserver.Databases[$InstallDatabase].ExecuteNonQuery($sql)
+				$null = $Server.Databases[$InstallDatabase].ExecuteNonQuery($sql)
 			}
 			catch
 			{
@@ -81,7 +81,7 @@
 			try
 			{
 				Write-Output "Removing $server"
-				$null = $sourceserver.Databases[$InstallDatabase].ExecuteNonQuery($sql)
+				$null = $Server.Databases[$InstallDatabase].ExecuteNonQuery($sql)
 			}
 			catch
 			{
@@ -94,7 +94,7 @@
 	
 	END
 	{
-		$sourceserver.ConnectionContext.Disconnect()
+		$Server.ConnectionContext.Disconnect()
 		
 	}
 }
